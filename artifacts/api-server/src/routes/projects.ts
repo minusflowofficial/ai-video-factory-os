@@ -79,7 +79,7 @@ function randomPick<T>(pool: T[], n: number): T[] {
   return Array.from({ length: n }, (_, i) => s[i % s.length]);
 }
 
-const mixkitVideoUrl = (id: number) => `https://assets.mixkit.co/videos/${id}/${id}-360.mp4`;
+const mixkitVideoUrl = (id: number) => `https://assets.mixkit.co/videos/${id}/${id}-720.mp4`;
 const mixkitThumbUrl = (id: number) => `https://assets.mixkit.co/videos/${id}/${id}-thumb-360-0.jpg`;
 const mixkitMusicUrl = (id: number) => `https://assets.mixkit.co/music/${id}/${id}.mp3`;
 
@@ -138,7 +138,11 @@ export type CaptionStyle =
   | "netflix"    // white on solid black bar
   | "tiktok"     // large white with thick black outline
   | "cinematic"  // amber/gold text, wide dark box, bottom
-  | "news";      // black text on white/yellow ticker strip
+  | "news"       // black text on white/yellow ticker strip
+  | "mrbeast"    // giant white center-screen, mega black stroke — MrBeast style
+  | "viral"      // yellow text, black outline, center screen — short-form viral
+  | "gaming"     // neon cyan, dark bg, glow shadow — gaming/esports
+  | "highlight"; // white text, amber highlight box, centered — educational/tutorial
 
 export interface RenderOptions {
   showTitle:        boolean;
@@ -225,6 +229,55 @@ function buildCaptionFilter(
         `${xCenter}:y=h*0.90:` +
         `line_spacing=4:` +
         `box=1:boxcolor=#F5C518@0.95:boxborderw=16:` +
+        `${enable}[${out}]`
+      );
+
+    case "mrbeast":
+      // Giant white text, CENTER of screen, thick black stroke — MrBeast signature
+      return (
+        `[${prev}]drawtext=fontfile=${FONT}:textfile=${capFile}:` +
+        `fontsize=52:fontcolor=white:` +
+        `${xCenter}:y=(h-text_h)/2:` +
+        `line_spacing=8:` +
+        `bordercolor=black:borderw=6:` +
+        `shadowcolor=black@0.6:shadowx=4:shadowy=4:` +
+        `${enable}[${out}]`
+      );
+
+    case "viral":
+      // Yellow text, black outline, center-screen — Shorts/Reels viral style
+      return (
+        `[${prev}]drawtext=fontfile=${FONT}:textfile=${capFile}:` +
+        `fontsize=48:fontcolor=#FFE000:` +
+        `${xCenter}:y=(h-text_h)/2:` +
+        `line_spacing=8:` +
+        `bordercolor=#000000:borderw=5:` +
+        `shadowcolor=black@0.8:shadowx=3:shadowy=3:` +
+        `${enable}[${out}]`
+      );
+
+    case "gaming":
+      // Neon cyan text, dark box, blue glow — gaming/esports streamer style
+      return (
+        `[${prev}]drawtext=fontfile=${FONT}:textfile=${capFile}:` +
+        `fontsize=38:fontcolor=#00E5FF:` +
+        `${xCenter}:y=h*0.80:` +
+        `line_spacing=6:` +
+        `box=1:boxcolor=#0a0a1a@0.85:boxborderw=18:` +
+        `bordercolor=#00E5FF@0.5:borderw=1:` +
+        `shadowcolor=#0066FF@0.9:shadowx=0:shadowy=0:` +
+        `${enable}[${out}]`
+      );
+
+    case "highlight":
+      // White text on amber/gold box, centered — tutorial/educational style
+      return (
+        `[${prev}]drawtext=fontfile=${FONT}:textfile=${capFile}:` +
+        `fontsize=30:fontcolor=white:` +
+        `${xCenter}:y=h*0.82:` +
+        `line_spacing=6:` +
+        `box=1:boxcolor=#D97706@0.92:boxborderw=20:` +
+        `shadowcolor=black@0.4:shadowx=1:shadowy=1:` +
         `${enable}[${out}]`
       );
 
@@ -485,7 +538,7 @@ async function renderProject(
       status: "completed",
       renderProgress: 100,
       videoUrl: `/api/projects/${id}/output`,
-      thumbnailUrl: assets[0]?.url.replace("360.mp4", "thumb-360-0.jpg") ?? null,
+      thumbnailUrl: assets[0]?.url.replace("720.mp4", "thumb-360-0.jpg") ?? null,
       updatedAt: new Date(),
     }).where(eq(projectsTable.id, id));
 
@@ -799,7 +852,7 @@ router.post("/projects/:id/render", async (req, res): Promise<void> => {
   const { numClips, clipDur } = getClipConfig(totalSecs);
   const clipsToUse = Math.min(assets.length, numClips);
 
-  const VALID_CAP_STYLES = ["modern","bold-box","netflix","tiktok","cinematic","news"];
+  const VALID_CAP_STYLES = ["modern","bold-box","netflix","tiktok","cinematic","news","mrbeast","viral","gaming","highlight"];
   const opts: RenderOptions = {
     showTitle:        req.body?.showTitle        === true,
     showCaptions:     req.body?.showCaptions     === true,
@@ -816,6 +869,7 @@ router.post("/projects/:id/render", async (req, res): Promise<void> => {
   const [updated] = await db.update(projectsTable).set({
     status: "rendering",
     renderProgress: 0,
+    voiceoverUrl: musicUrl,
     updatedAt: new Date(),
   }).where(eq(projectsTable.id, id)).returning();
 

@@ -65,7 +65,7 @@ async function verifyVideoIds(ids: number[], need: number): Promise<number[]> {
   const checks = ids.slice(0, need * 5).map(async id => {
     try {
       const r = await fetch(
-        `https://assets.mixkit.co/videos/${id}/${id}-360.mp4`,
+        `https://assets.mixkit.co/videos/${id}/${id}-720.mp4`,
         { method: "HEAD", headers: { "User-Agent": UA, "Referer": REFERER }, signal: AbortSignal.timeout(5_000) },
       );
       return r.ok ? id : null;

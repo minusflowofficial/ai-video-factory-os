@@ -43,7 +43,7 @@ const TRANSITIONS = [
 ] as const;
 
 type TransitionEffect = "fade" | "xfade" | "zoom";
-type CaptionStyle    = "modern" | "bold-box" | "netflix" | "tiktok" | "cinematic" | "news";
+type CaptionStyle = "modern" | "bold-box" | "netflix" | "tiktok" | "cinematic" | "news" | "mrbeast" | "viral" | "gaming" | "highlight";
 
 interface RenderOpts {
   showTitle:        boolean;
@@ -53,13 +53,17 @@ interface RenderOpts {
   addSfx:           boolean;
 }
 
-const CAPTION_STYLES: { value: CaptionStyle; label: string; hint: string; preview: string }[] = [
-  { value: "modern",    label: "Modern",    hint: "White text, drop shadow, minimal",      preview: "text-white drop-shadow-lg" },
-  { value: "bold-box",  label: "Bold Box",  hint: "White on dark box (YouTube style)",     preview: "text-white bg-black/70 px-1" },
-  { value: "netflix",   label: "Netflix",   hint: "White on solid black bar",              preview: "text-white bg-black px-1" },
-  { value: "tiktok",    label: "TikTok",    hint: "Large white with thick black outline",  preview: "text-white font-black [text-shadow:_-2px_-2px_0_#000,_2px_-2px_0_#000,_-2px_2px_0_#000,_2px_2px_0_#000]" },
-  { value: "cinematic", label: "Cinematic", hint: "Gold text on dark widescreen bar",      preview: "text-amber-300 bg-gray-900/80 px-1" },
-  { value: "news",      label: "News",      hint: "Black text on yellow ticker strip",     preview: "text-black bg-yellow-400 px-1" },
+const CAPTION_STYLES: { value: CaptionStyle; label: string; hint: string; previewText: string; previewClass: string }[] = [
+  { value: "mrbeast",   label: "MrBeast",   hint: "Giant white text, center screen, thick black stroke",  previewText: "WOW!", previewClass: "text-white text-[11px] font-black [text-shadow:_-2px_-2px_0_#000,_2px_-2px_0_#000,_-2px_2px_0_#000,_2px_2px_0_#000,_0_0_6px_#000]" },
+  { value: "viral",     label: "Viral",     hint: "Yellow text, black outline, center screen — Shorts/Reels", previewText: "CRAZY!", previewClass: "text-yellow-300 text-[11px] font-black [text-shadow:_-2px_-2px_0_#000,_2px_-2px_0_#000,_-2px_2px_0_#000,_2px_2px_0_#000]" },
+  { value: "tiktok",    label: "TikTok",    hint: "Large white, thick black outline — TikTok style",       previewText: "Abc",  previewClass: "text-white text-[10px] font-black [text-shadow:_-1px_-1px_0_#000,_1px_-1px_0_#000,_-1px_1px_0_#000,_1px_1px_0_#000]" },
+  { value: "gaming",    label: "Gaming",    hint: "Neon cyan, dark box, glow — streamer/esports style",    previewText: "Abc",  previewClass: "text-cyan-300 text-[9px] font-bold bg-gray-900/80 px-0.5" },
+  { value: "bold-box",  label: "Bold Box",  hint: "White on dark box — YouTube subtitle style",            previewText: "Abc",  previewClass: "text-white text-[9px] font-semibold bg-black/70 px-1" },
+  { value: "netflix",   label: "Netflix",   hint: "White on solid black bar — Netflix subtitle style",     previewText: "Abc",  previewClass: "text-white text-[9px] bg-black px-1" },
+  { value: "highlight", label: "Highlight", hint: "White on amber box — tutorial/educational style",       previewText: "Abc",  previewClass: "text-white text-[9px] font-semibold bg-amber-600 px-1" },
+  { value: "cinematic", label: "Cinematic", hint: "Gold text on dark bar — movie/cinematic style",         previewText: "Abc",  previewClass: "text-amber-300 text-[9px] bg-gray-900/80 px-1" },
+  { value: "modern",    label: "Modern",    hint: "White text, drop shadow only — minimal clean look",     previewText: "Abc",  previewClass: "text-white text-[9px] drop-shadow-lg" },
+  { value: "news",      label: "News",      hint: "Black text on yellow ticker strip",                     previewText: "Abc",  previewClass: "text-black text-[9px] font-bold bg-yellow-400 px-1" },
 ];
 
 const SCRIPTED_STEPS    = ["Generating script", "Fetching assets", "Matching music", "Rendering video"];
@@ -122,6 +126,7 @@ export default function StudioEditor() {
     transitionEffect: "xfade",
     addSfx:           false,
   });
+  const [showMusicLibrary, setShowMusicLibrary] = useState(false);
 
   // Music+visuals only — no text overlays. Skips script generation step.
   const isSatisfyingMode = !renderOpts.showTitle && !renderOpts.showCaptions;
@@ -520,35 +525,38 @@ export default function StudioEditor() {
 
                 {/* Caption style picker — visible only when captions are ON */}
                 {renderOpts.showCaptions && (
-                  <div className="ml-0 pl-3 border-l-2 border-amber-100 space-y-1.5">
+                  <div className="pl-3 border-l-2 border-amber-100 space-y-1.5">
                     <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Caption style</p>
-                    <div className="grid grid-cols-3 gap-1">
-                      {CAPTION_STYLES.map(s => (
-                        <button
-                          key={s.value}
-                          title={s.hint}
-                          onClick={() => setRenderOpts(o => ({ ...o, captionStyle: s.value }))}
-                          className={cn(
-                            "flex flex-col items-center gap-1 p-2 rounded-lg border text-center transition-all",
-                            renderOpts.captionStyle === s.value
-                              ? "bg-amber-50 border-amber-400 ring-1 ring-amber-300"
-                              : "bg-white border-gray-200 hover:border-gray-300",
-                          )}
-                        >
-                          {/* Mini caption preview */}
-                          <div className="w-full h-6 bg-gray-800 rounded overflow-hidden flex items-end pb-0.5">
-                            <span className={cn("text-[7px] w-full text-center truncate leading-tight px-0.5", s.preview)}>
-                              Abc Text
+                    <div className="grid grid-cols-2 gap-1">
+                      {CAPTION_STYLES.map(s => {
+                        const active = renderOpts.captionStyle === s.value;
+                        return (
+                          <button
+                            key={s.value}
+                            title={s.hint}
+                            onClick={() => setRenderOpts(o => ({ ...o, captionStyle: s.value }))}
+                            className={cn(
+                              "flex items-center gap-2 px-2 py-1.5 rounded-lg border text-left transition-all",
+                              active
+                                ? "bg-amber-50 border-amber-400 ring-1 ring-amber-300"
+                                : "bg-white border-gray-200 hover:border-gray-300",
+                            )}
+                          >
+                            {/* Mini video frame preview */}
+                            <div className="w-10 h-6 shrink-0 bg-gray-700 rounded overflow-hidden flex items-center justify-center">
+                              <span className={cn("text-center leading-none px-0.5", s.previewClass)}>
+                                {s.previewText}
+                              </span>
+                            </div>
+                            <span className={cn(
+                              "text-[9px] font-semibold truncate",
+                              active ? "text-amber-700" : "text-gray-600",
+                            )}>
+                              {s.label}
                             </span>
-                          </div>
-                          <span className={cn(
-                            "text-[9px] font-semibold",
-                            renderOpts.captionStyle === s.value ? "text-amber-700" : "text-gray-600",
-                          )}>
-                            {s.label}
-                          </span>
-                        </button>
-                      ))}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -652,40 +660,101 @@ export default function StudioEditor() {
               )}
 
               {/* ── Music tab ──────────────────────────────────────────── */}
-              {assetTab === "music" && (
-                <div className="space-y-1">
-                  <p className="text-[10px] text-gray-400 mb-2">▶ preview · click to select</p>
-                  {MUSIC.map(track => {
-                    const playing  = playingTrack  === track.id;
-                    const selected = selectedTrack === track.id;
-                    return (
-                      <div
-                        key={track.id}
-                        onClick={() => setSelectedTrack(track.id)}
-                        className={cn(
-                          "flex items-center gap-2 p-2 rounded-lg cursor-pointer border transition-colors",
-                          selected ? "bg-amber-50 border-amber-200" : "bg-white border-gray-100 hover:border-gray-200",
-                        )}
-                      >
-                        <button
-                          onClick={e => { e.stopPropagation(); togglePlay(track.id); }}
+              {assetTab === "music" && (() => {
+                // Extract track ID from voiceoverUrl: "…/music/872/872.mp3" → 872
+                const voiceUrl  = project?.voiceoverUrl ?? "";
+                const urlMatch  = voiceUrl.match(/\/music\/(\d+)\/\d+\.mp3/);
+                const usedId    = urlMatch ? parseInt(urlMatch[1], 10) : null;
+                const usedTrack = usedId ? MUSIC.find(t => t.id === usedId) : null;
+
+                return (
+                  <div className="space-y-2">
+                    {/* Used track chip */}
+                    {usedId && (
+                      <div className="space-y-1">
+                        <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Used in this video</p>
+                        <div
+                          onClick={() => setSelectedTrack(usedId)}
                           className={cn(
-                            "w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-colors",
-                            playing ? "bg-amber-400 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200",
+                            "flex items-center gap-2 p-2 rounded-lg cursor-pointer border transition-colors",
+                            selectedTrack === usedId || selectedTrack === null
+                              ? "bg-amber-50 border-amber-300"
+                              : "bg-white border-gray-100 hover:border-gray-200",
                           )}
                         >
-                          {playing ? <Pause className="w-2.5 h-2.5" fill="currentColor" /> : <Play className="w-2.5 h-2.5" fill="currentColor" />}
-                        </button>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium text-gray-800 truncate">{track.title}</p>
-                          <p className="text-[10px] text-gray-400">{track.mood} · {track.dur}</p>
+                          <button
+                            onClick={e => { e.stopPropagation(); togglePlay(usedId); }}
+                            className={cn(
+                              "w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-colors",
+                              playingTrack === usedId ? "bg-amber-400 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200",
+                            )}
+                          >
+                            {playingTrack === usedId
+                              ? <Pause className="w-2.5 h-2.5" fill="currentColor" />
+                              : <Play  className="w-2.5 h-2.5" fill="currentColor" />}
+                          </button>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium text-gray-800 truncate">
+                              {usedTrack?.title ?? `Track #${usedId}`}
+                            </p>
+                            <p className="text-[10px] text-gray-400">
+                              {usedTrack ? `${usedTrack.mood} · ${usedTrack.dur}` : "Mixkit track"}
+                            </p>
+                          </div>
+                          {(selectedTrack === usedId || selectedTrack === null) && (
+                            <CheckCircle2 className="w-3 h-3 text-amber-500 shrink-0" />
+                          )}
                         </div>
-                        {selected && <CheckCircle2 className="w-3 h-3 text-amber-500 shrink-0" />}
                       </div>
-                    );
-                  })}
-                </div>
-              )}
+                    )}
+
+                    {/* Change music toggle */}
+                    <button
+                      onClick={() => setShowMusicLibrary(v => !v)}
+                      className="text-[10px] text-gray-400 hover:text-gray-600 flex items-center gap-1 transition-colors"
+                    >
+                      <Music2 className="w-3 h-3" />
+                      {showMusicLibrary ? "Hide library" : "Change music…"}
+                    </button>
+
+                    {/* Full library (collapsed by default) */}
+                    {(showMusicLibrary || !usedId) && (
+                      <div className="space-y-1">
+                        {!usedId && <p className="text-[10px] text-gray-400">▶ preview · click to select</p>}
+                        {MUSIC.map(track => {
+                          const playing  = playingTrack  === track.id;
+                          const selected = selectedTrack === track.id;
+                          return (
+                            <div
+                              key={track.id}
+                              onClick={() => setSelectedTrack(track.id)}
+                              className={cn(
+                                "flex items-center gap-2 p-2 rounded-lg cursor-pointer border transition-colors",
+                                selected ? "bg-amber-50 border-amber-200" : "bg-white border-gray-100 hover:border-gray-200",
+                              )}
+                            >
+                              <button
+                                onClick={e => { e.stopPropagation(); togglePlay(track.id); }}
+                                className={cn(
+                                  "w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-colors",
+                                  playing ? "bg-amber-400 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200",
+                                )}
+                              >
+                                {playing ? <Pause className="w-2.5 h-2.5" fill="currentColor" /> : <Play className="w-2.5 h-2.5" fill="currentColor" />}
+                              </button>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-medium text-gray-800 truncate">{track.title}</p>
+                                <p className="text-[10px] text-gray-400">{track.mood} · {track.dur}</p>
+                              </div>
+                              {selected && <CheckCircle2 className="w-3 h-3 text-amber-500 shrink-0" />}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* ── Voice tab ──────────────────────────────────────────── */}
               {assetTab === "voice" && (
