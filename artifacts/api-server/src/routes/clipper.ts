@@ -79,7 +79,15 @@ router.post("/clipper/transcript", async (req, res): Promise<void> => {
 // Analyze: AI viral clip detection using Groq (via OpenRouter)
 // ---------------------------------------------------------------------------
 router.post("/clipper/analyze", async (req, res): Promise<void> => {
-  const { transcripts, videoInfo, language = "en" } = req.body ?? {};
+  const {
+    transcripts,
+    videoInfo,
+    language     = "en",
+    numClips     = 10,
+    minDuration  = 30,
+    captionStyle = "Bold Yellow",
+    hookFilter   = null,
+  } = req.body ?? {};
   if (!transcripts) { res.status(400).json({ error: "transcripts required" }); return; }
 
   const apiKey = process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY;
@@ -105,7 +113,11 @@ router.post("/clipper/analyze", async (req, res): Promise<void> => {
   const transcriptText = segments
     .map(s => `[${s.start}] ${s.text}`)
     .join("\n")
-    .slice(0, 12000); // Groq models have large context
+    .slice(0, 12000);
+
+  const hookConstraint = hookFilter
+    ? `IMPORTANT: You MUST only suggest clips with hookType = "${hookFilter}".`
+    : `hookType options: Curiosity, Shock, Debate, Story, Emotional, Educational, Contrarian, Inspirational, Controversial, Fear, Warning`;
 
   const systemPrompt = `You are an elite YouTube Shorts, TikTok, and Instagram Reels viral content expert. You analyze transcripts and identify the most viral-worthy clip segments. You ONLY output valid JSON arrays — no markdown, no explanation, no preamble.`;
 
@@ -114,12 +126,18 @@ router.post("/clipper/analyze", async (req, res): Promise<void> => {
 Video: "${title}" by ${author}
 Duration: ${duration}
 
+SETTINGS:
+- Find exactly ${numClips} clips (scoring 7+ viral potential)
+- Each clip must be at least ${minDuration} seconds long
+- Caption style for all clips: "${captionStyle}"
+- ${hookConstraint}
+
 TRANSCRIPT:
 ${transcriptText}
 
 ---
 
-Find 5-10 clips scoring 7+ viral potential. Output ONLY a valid JSON array:
+Output ONLY a valid JSON array with exactly ${numClips} objects (or fewer if the video is too short):
 
 [
   {
@@ -134,10 +152,11 @@ Find 5-10 clips scoring 7+ viral potential. Output ONLY a valid JSON array:
     "hook": "Best hook under 12 words",
     "punchline": "The key reveal or emotional peak",
     "whyItWorks": "Why viewers will stop scrolling and stay",
+    "captionStyle": "${captionStyle}",
     "ctaOptions": ["CTA 1", "CTA 2", "CTA 3"],
     "titleIdeas": ["Title 1", "Title 2", "Title 3", "Title 4", "Title 5"],
     "hashtags": ["#tag1", "#tag2", "#tag3", "#tag4", "#tag5"],
-    "editorNotes": "Specific editing instructions",
+    "editorNotes": "Specific editing tips for ${captionStyle} captions + face-centered ${req.body?.aspectRatio ?? "9:16"} crop",
     "hookStrength": 8,
     "retentionScore": 7,
     "shareability": 9,
@@ -145,7 +164,6 @@ Find 5-10 clips scoring 7+ viral potential. Output ONLY a valid JSON array:
   }
 ]
 
-hookType options: Curiosity, Shock, Debate, Story, Emotional, Educational, Contrarian, Inspirational, Controversial, Fear, Warning
 Return ONLY the JSON array. No markdown. No explanation.`;
 
   const MODEL = "qwen/qwen3.6-flash";
