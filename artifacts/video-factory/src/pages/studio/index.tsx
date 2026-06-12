@@ -2,133 +2,100 @@ import { AppLayout } from "@/components/AppLayout";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Video, BarChart3, Clock, Zap, PlusCircle, Clapperboard } from "lucide-react";
 import { useListProjects } from "@workspace/api-client-react";
+import { Film, Plus, Clock, CheckCircle2, Zap, Clapperboard } from "lucide-react";
 
 export default function StudioDashboard() {
   const { data: projects = [], isLoading } = useListProjects();
-  
-  const stats = {
-    totalProjects: projects.length,
-    completedVideos: projects.filter(p => p.status === 'completed').length,
-    processingVideos: projects.filter(p => ['scripting', 'generating_assets', 'rendering', 'fetching-assets', 'voiceover'].includes(p.status)).length,
-    totalMinutes: projects.filter(p => p.status === 'completed').length * 60,
-  };
+
+  const total = projects.length;
+  const completed = projects.filter(p => p.status === "completed").length;
+  const inProgress = projects.filter(p =>
+    ["scripting", "fetching-assets", "voiceover", "rendering"].includes(p.status)
+  ).length;
 
   return (
     <AppLayout>
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex items-center justify-between mb-8">
+      <div className="p-6 max-w-5xl mx-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-3xl font-heading font-bold text-white mb-2">Studio Dashboard</h1>
-            <div className="flex items-center gap-2 text-sm text-zinc-400">
-              <span>Active AI Pipeline:</span>
-              <div className="flex items-center gap-1 font-mono text-xs bg-white/5 px-2 py-1 rounded border border-white/8">
-                <span className="text-blue-400">Gemini</span>
-                <span className="text-zinc-600">→</span>
-                <span className="text-emerald-400">OpenAI</span>
-                <span className="text-zinc-600">→</span>
-                <span className="text-amber-400">Claude</span>
-              </div>
-            </div>
+            <h1 className="text-xl font-semibold text-gray-900">Studio</h1>
+            <p className="text-sm text-gray-500 mt-0.5">Your video projects</p>
           </div>
           <Link href="/studio/new">
-            <Button className="bg-primary hover:bg-primary/90 text-primary-foreground gap-2 shadow-lg shadow-primary/20 font-semibold">
-              <PlusCircle className="w-4 h-4" />
-              New Project
+            <Button size="sm" className="bg-amber-400 hover:bg-amber-500 text-amber-950 font-semibold text-xs h-8">
+              <Plus className="w-3.5 h-3.5 mr-1.5" /> New Project
             </Button>
           </Link>
         </div>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-12">
-          <div className="glass-panel p-6 rounded-xl border border-white/5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-zinc-400 font-medium">Total Projects</h3>
-              <Clapperboard className="w-5 h-5 text-amber-400" />
+        {/* Stats */}
+        <div className="grid grid-cols-3 gap-4 mb-8">
+          {[
+            { label: "Total projects", value: total,      icon: Clapperboard, color: "text-gray-600" },
+            { label: "Completed",      value: completed,  icon: CheckCircle2, color: "text-emerald-600" },
+            { label: "In progress",    value: inProgress, icon: Zap,          color: "text-amber-600" },
+          ].map((stat) => (
+            <div key={stat.label} className="bg-white rounded-xl border border-gray-100 p-4 flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center">
+                <stat.icon className={`w-4 h-4 ${stat.color}`} />
+              </div>
+              <div>
+                <p className="text-xl font-bold text-gray-900">{stat.value}</p>
+                <p className="text-xs text-gray-500">{stat.label}</p>
+              </div>
             </div>
-            <p className="text-3xl font-bold font-heading">{stats.totalProjects}</p>
-          </div>
-          
-          <div className="glass-panel p-6 rounded-xl border border-white/5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-zinc-400 font-medium">Completed</h3>
-              <BarChart3 className="w-5 h-5 text-emerald-400" />
-            </div>
-            <p className="text-3xl font-bold font-heading">{stats.completedVideos}</p>
-          </div>
-
-          <div className="glass-panel p-6 rounded-xl border border-white/5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-zinc-400 font-medium">Processing</h3>
-              <Zap className="w-5 h-5 text-yellow-400" />
-            </div>
-            <p className="text-3xl font-bold font-heading">{stats.processingVideos}</p>
-          </div>
-
-          <div className="glass-panel p-6 rounded-xl border border-white/5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-zinc-400 font-medium">Seconds Rendered</h3>
-              <Clock className="w-5 h-5 text-sky-400" />
-            </div>
-            <p className="text-3xl font-bold font-heading">{stats.totalMinutes}</p>
-          </div>
+          ))}
         </div>
 
-        <div>
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-heading font-bold text-white">Recent Projects</h2>
-            <Link href="/projects" className="text-sm text-primary hover:text-primary/80 transition-colors">
-              View all
+        {/* Projects */}
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-gray-700">Recent Projects</h2>
+          <Link href="/projects" className="text-xs text-amber-600 hover:text-amber-700 font-medium">View all</Link>
+        </div>
+
+        {isLoading ? (
+          <div className="text-center py-12 text-gray-400 text-sm">Loading...</div>
+        ) : projects.length === 0 ? (
+          <div className="bg-white rounded-xl border border-gray-100 border-dashed p-14 text-center">
+            <Film className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+            <h3 className="font-medium text-gray-700 mb-1">No projects yet</h3>
+            <p className="text-sm text-gray-400 mb-5">Create your first video project to get started.</p>
+            <Link href="/studio/new">
+              <Button size="sm" className="bg-amber-400 hover:bg-amber-500 text-amber-950 font-semibold text-xs">
+                Create first project
+              </Button>
             </Link>
           </div>
-
-          {isLoading ? (
-            <div className="text-center py-12 text-zinc-500">Loading projects...</div>
-          ) : projects.length === 0 ? (
-            <div className="glass-panel border border-white/5 rounded-xl p-12 text-center">
-              <Clapperboard className="w-12 h-12 text-zinc-600 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-white mb-2">No projects yet</h3>
-              <p className="text-zinc-400 mb-6">Create your first AI-generated video project to get started.</p>
-              <Link href="/studio/new">
-                <Button className="bg-primary text-primary-foreground font-semibold">Create First Project</Button>
-              </Link>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {projects.slice(0, 6).map((project) => (
-                <Link key={project.id} href={`/studio/${project.id}`}>
-                  <div className="glass-panel border border-white/5 rounded-xl overflow-hidden hover:border-primary/40 transition-colors group cursor-pointer">
-                    <div className="aspect-video bg-zinc-900 relative">
-                      {project.thumbnailUrl ? (
-                        <img src={project.thumbnailUrl} alt={project.title} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="absolute inset-0 flex items-center justify-center text-zinc-700">
-                          <Video className="w-8 h-8" />
-                        </div>
-                      )}
-                      <div className="absolute top-3 right-3">
-                        <StatusBadge status={project.status} />
-                      </div>
-                      <div className="absolute bottom-3 right-3 bg-black/80 px-2 py-1 rounded text-xs font-mono text-white">
-                        {project.duration || 'Auto'}
-                      </div>
-                    </div>
-                    <div className="p-4">
-                      <h3 className="font-heading font-semibold text-white mb-1 group-hover:text-primary transition-colors truncate">
-                        {project.title}
-                      </h3>
-                      <div className="flex items-center justify-between text-sm text-zinc-400">
-                        <span>{project.topic || 'No topic'}</span>
-                        <span>{new Date(project.createdAt).toLocaleDateString()}</span>
-                      </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {projects.slice(0, 9).map((p) => (
+              <Link key={p.id} href={`/studio/${p.id}`}>
+                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden hover:border-amber-200 hover:shadow-sm transition-all cursor-pointer group">
+                  <div className="aspect-video bg-gray-50 relative flex items-center justify-center overflow-hidden">
+                    {p.thumbnailUrl ? (
+                      <img src={p.thumbnailUrl} alt={p.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                    ) : (
+                      <Film className="w-7 h-7 text-gray-300" />
+                    )}
+                    <div className="absolute top-2 right-2">
+                      <StatusBadge status={p.status} />
                     </div>
                   </div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
+                  <div className="p-3">
+                    <p className="font-medium text-gray-900 text-sm truncate group-hover:text-amber-700 transition-colors">{p.title}</p>
+                    <div className="flex items-center gap-3 mt-1.5 text-xs text-gray-400">
+                      <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{p.duration}</span>
+                      <span>{p.aspectRatio}</span>
+                      <span className="ml-auto">{new Date(p.createdAt).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
     </AppLayout>
   );

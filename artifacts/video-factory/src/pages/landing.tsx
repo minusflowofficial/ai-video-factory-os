@@ -1,197 +1,106 @@
 import { MarketingLayout } from "@/components/MarketingLayout";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
-import { motion } from "framer-motion";
-import { Clapperboard, Video, Settings, Layout, Zap, ArrowRight, Play, CheckCircle2 } from "lucide-react";
-import heroStudioImage from "@/assets/images/hero-studio.png";
+import { ArrowRight, Play, Zap, Film, Music2, Layers } from "lucide-react";
 
 export default function LandingPage() {
-  const fadeIn = {
-    hidden: { opacity: 0, y: 20 },
-    visible: { opacity: 1, y: 0, transition: { duration: 0.6 } }
-  };
-
-  const stagger = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: { staggerChildren: 0.1 }
-    }
-  };
-
   return (
     <MarketingLayout>
-      {/* Hero Section */}
-      <section className="relative pt-32 pb-20 md:pt-48 md:pb-32 overflow-hidden">
-        {/* Background effects */}
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-amber-900/15 via-[#080b10] to-[#080b10] -z-10" />
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-3xl h-[400px] bg-amber-500/10 blur-[120px] rounded-full -z-10" />
-        
-        <div className="container mx-auto px-4 text-center">
-          <motion.div
-            initial="hidden"
-            animate="visible"
-            variants={stagger}
-            className="max-w-4xl mx-auto space-y-8"
-          >
-            <motion.div variants={fadeIn} className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-sm font-medium text-zinc-300">
-              <Clapperboard className="w-4 h-4 text-amber-400" />
-              <span>The cinematic AI production studio</span>
-            </motion.div>
-            
-            <motion.h1 variants={fadeIn} className="text-5xl md:text-7xl font-heading font-bold tracking-tight leading-tight">
-              Create cinematic videos at{" "}
-              <span className="bg-gradient-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent glow-text">
-                machine speed
-              </span>
-            </motion.h1>
-            
-            <motion.p variants={fadeIn} className="text-lg md:text-xl text-zinc-400 max-w-2xl mx-auto leading-relaxed">
-              The professional OS for automated video creation. Combine Gemini, OpenAI, and Claude to generate scripts, source premium B-roll, and render perfect videos in minutes.
-            </motion.p>
-            
-            <motion.div variants={fadeIn} className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
-              <Link href="/studio">
-                <Button size="lg" className="h-14 px-8 text-lg bg-primary hover:bg-primary/90 text-primary-foreground rounded-full group w-full sm:w-auto font-semibold shadow-xl shadow-amber-500/20">
-                  Start creating for free
-                  <ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
-                </Button>
-              </Link>
-              <Button size="lg" variant="outline" className="h-14 px-8 text-lg rounded-full border-white/10 hover:bg-white/5 w-full sm:w-auto">
-                <Play className="w-5 h-5 ml-2 mr-2" fill="currentColor" />
-                Watch Demo
-              </Button>
-            </motion.div>
-          </motion.div>
+      {/* Hero */}
+      <section className="max-w-6xl mx-auto px-6 pt-20 pb-16 text-center">
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-gray-200 bg-gray-50 text-xs font-medium text-gray-600 mb-8">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+          Now with Mixkit asset library
+        </div>
 
-          <motion.div 
-            initial={{ opacity: 0, y: 40 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.4 }}
-            className="mt-20 relative mx-auto max-w-5xl"
-          >
-            <div className="absolute inset-0 bg-gradient-to-t from-[#080b10] via-transparent to-transparent z-10" />
-            <div className="glass-panel rounded-2xl overflow-hidden border border-white/10 shadow-2xl p-2 bg-black/40">
-              <img 
-                src={heroStudioImage} 
-                alt="AI Video Factory Studio Interface" 
-                className="w-full h-auto rounded-xl border border-white/5 opacity-90"
-                onError={(e) => {
-                  e.currentTarget.src = "https://images.unsplash.com/photo-1600132806370-bf17e65e942f?q=80&w=2000&auto=format&fit=crop";
-                }}
-              />
-            </div>
-          </motion.div>
+        <h1 className="text-5xl md:text-6xl font-bold text-gray-900 tracking-tight leading-tight mb-6">
+          The AI OS for<br />
+          <span className="text-amber-500">Video Creation</span>
+        </h1>
+
+        <p className="text-lg text-gray-500 max-w-xl mx-auto mb-10 leading-relaxed">
+          Generate scripts, source B-roll, create voiceovers, and render
+          finished videos — all with a single click.
+        </p>
+
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-16">
+          <Link href="/studio">
+            <Button className="h-10 px-6 bg-amber-400 hover:bg-amber-500 text-amber-950 font-semibold text-sm">
+              Start creating — free
+              <ArrowRight className="w-4 h-4 ml-2" />
+            </Button>
+          </Link>
+          <Button variant="outline" className="h-10 px-6 text-sm border-gray-200 text-gray-600 hover:bg-gray-50">
+            <Play className="w-3.5 h-3.5 mr-2" fill="currentColor" />
+            Watch demo
+          </Button>
+        </div>
+
+        {/* App screenshot placeholder */}
+        <div className="rounded-xl border border-gray-200 overflow-hidden shadow-sm bg-white max-w-4xl mx-auto">
+          <div className="h-8 bg-gray-50 border-b border-gray-100 flex items-center gap-1.5 px-4">
+            <div className="w-2.5 h-2.5 rounded-full bg-red-400" />
+            <div className="w-2.5 h-2.5 rounded-full bg-yellow-400" />
+            <div className="w-2.5 h-2.5 rounded-full bg-green-400" />
+            <span className="ml-3 text-xs text-gray-400 font-mono">app.aivideofactory.com/studio</span>
+            <span className="ml-auto text-xs font-medium text-emerald-600">● LIVE</span>
+          </div>
+          <img
+            src="https://images.unsplash.com/photo-1611532736597-de2d4265fba3?q=80&w=1600&auto=format&fit=crop"
+            alt="Studio Interface"
+            className="w-full h-auto object-cover opacity-90"
+            style={{ maxHeight: 320 }}
+          />
         </div>
       </section>
 
-      {/* Stats/Logo Cloud */}
-      <section className="py-12 border-y border-white/5 bg-black/20">
-        <div className="container mx-auto px-4">
-          <p className="text-center text-sm font-medium text-zinc-500 mb-8 uppercase tracking-widest">Powered by industry-leading AI models</p>
-          <div className="flex flex-wrap justify-center gap-8 md:gap-16 opacity-50 grayscale hover:grayscale-0 transition-all duration-500">
-            {["OpenAI", "Anthropic", "Google Gemini", "Groq", "ElevenLabs", "Mixkit"].map((logo) => (
-              <div key={logo} className="text-xl md:text-2xl font-heading font-bold text-white tracking-tight flex items-center">
-                {logo}
-              </div>
+      {/* Social proof */}
+      <section className="border-y border-gray-100 py-8 bg-gray-50">
+        <div className="max-w-6xl mx-auto px-6 text-center">
+          <p className="text-xs font-medium text-gray-400 uppercase tracking-widest mb-6">Powered by</p>
+          <div className="flex flex-wrap justify-center gap-8 md:gap-12">
+            {["OpenAI", "Anthropic Claude", "Google Gemini", "Groq", "ElevenLabs", "Mixkit"].map((name) => (
+              <span key={name} className="text-sm font-semibold text-gray-400">{name}</span>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Features Showcase */}
-      <section className="py-24 md:py-32 relative">
-        <div className="container mx-auto px-4">
-          <div className="text-center max-w-3xl mx-auto mb-20">
-            <h2 className="text-3xl md:text-5xl font-heading font-bold mb-6">A complete production studio in your browser</h2>
-            <p className="text-zinc-400 text-lg">Stop juggling multiple tabs and subscriptions. We've combined the entire video creation pipeline into one seamless, powerful interface.</p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-8">
-            {[
-              {
-                icon: Zap,
-                title: "Multi-Model AI Brain",
-                description: "Route your prompts through Gemini for ideation, Claude for scripting, and OpenAI for refinement. Build custom AI chains."
-              },
-              {
-                icon: Video,
-                title: "Cinematic B-Roll",
-                description: "Automatically match script context to premium 4K stock footage and Mixkit library. Semantic search finds exactly what you mean."
-              },
-              {
-                icon: Layout,
-                title: "Dynamic Layouts",
-                description: "Export instantly to 9:16 Shorts, 16:9 YouTube, or 1:1 Social formats. Intelligent auto-framing keeps subjects centered."
-              }
-            ].map((feature, i) => (
-              <div key={i} className="glass-panel p-8 rounded-2xl border border-white/8 hover:border-primary/40 transition-colors group">
-                <div className="w-12 h-12 rounded-lg bg-primary/15 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-                  <feature.icon className="w-6 h-6 text-primary" />
-                </div>
-                <h3 className="text-xl font-heading font-bold mb-3 text-white">{feature.title}</h3>
-                <p className="text-zinc-400 leading-relaxed">{feature.description}</p>
-              </div>
-            ))}
-          </div>
+      {/* Features */}
+      <section className="max-w-6xl mx-auto px-6 py-20">
+        <div className="text-center mb-14">
+          <h2 className="text-3xl font-bold text-gray-900 mb-3">Everything in one place</h2>
+          <p className="text-gray-500 max-w-xl mx-auto">No more switching between tools. Script, source, voice, and render in a single workflow.</p>
         </div>
-      </section>
 
-      {/* How it Works */}
-      <section className="py-24 bg-black/40 border-y border-white/5">
-        <div className="container mx-auto px-4">
-          <div className="text-center max-w-3xl mx-auto mb-20">
-            <h2 className="text-3xl md:text-5xl font-heading font-bold mb-6">From idea to viral video in 3 steps</h2>
-          </div>
-
-          <div className="max-w-5xl mx-auto relative">
-            <div className="absolute left-8 top-8 bottom-8 w-px bg-white/10 hidden md:block" />
-            
-            <div className="space-y-16">
-              {[
-                {
-                  step: "01",
-                  title: "Define your vision",
-                  desc: "Enter a topic, niche, and select your visual style. Our AI orchestrator takes over, generating a compelling script optimized for retention.",
-                  color: "from-amber-500 to-orange-500"
-                },
-                {
-                  step: "02",
-                  title: "Review and refine",
-                  desc: "The Studio generates scenes, sources B-roll from Mixkit, and creates ultra-realistic voiceovers. Tweak anything in our powerful editor.",
-                  color: "from-sky-500 to-blue-500"
-                },
-                {
-                  step: "03",
-                  title: "Render and conquer",
-                  desc: "Export in 4K resolution across multiple aspect ratios simultaneously. Push directly to YouTube, TikTok, or download the assets.",
-                  color: "from-emerald-500 to-teal-500"
-                }
-              ].map((item, i) => (
-                <div key={i} className="relative flex flex-col md:flex-row gap-8 items-start">
-                  <div className={`w-16 h-16 shrink-0 rounded-2xl bg-gradient-to-br ${item.color} flex items-center justify-center text-2xl font-bold font-heading shadow-lg z-10`}>
-                    {item.step}
-                  </div>
-                  <div className="glass-panel flex-1 p-8 rounded-2xl border border-white/8">
-                    <h3 className="text-2xl font-heading font-bold mb-4">{item.title}</h3>
-                    <p className="text-zinc-400 text-lg leading-relaxed">{item.desc}</p>
-                  </div>
-                </div>
-              ))}
+        <div className="grid md:grid-cols-3 gap-6">
+          {[
+            { icon: Zap,    title: "One-click generation",  desc: "Hit Generate and watch your entire pipeline run automatically — script, B-roll, voice, render." },
+            { icon: Film,   title: "Mixkit B-roll library", desc: "Thousands of free cinematic clips automatically matched to your script context." },
+            { icon: Music2, title: "Background music",      desc: "Choose from curated Mixkit tracks. Preview and select before rendering." },
+            { icon: Layers, title: "Multi-format export",   desc: "9:16 Shorts, 16:9 YouTube, 1:1 Square — all from the same project." },
+            { icon: Zap,    title: "Bulk Factory",          desc: "Queue 10–500 videos at once. Ideal for faceless channels and content agencies." },
+            { icon: Film,   title: "AI model routing",      desc: "Route prompts through Gemini, Claude, or OpenAI. Chain models for best output." },
+          ].map((f, i) => (
+            <div key={i} className="p-5 rounded-xl border border-gray-100 bg-white hover:border-gray-200 transition-colors">
+              <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center mb-4">
+                <f.icon className="w-4 h-4 text-amber-600" />
+              </div>
+              <h3 className="font-semibold text-gray-900 mb-1.5 text-sm">{f.title}</h3>
+              <p className="text-xs text-gray-500 leading-relaxed">{f.desc}</p>
             </div>
-          </div>
+          ))}
         </div>
       </section>
 
       {/* CTA */}
-      <section className="py-32 relative overflow-hidden">
-        <div className="absolute inset-0 bg-amber-500/8 blur-[100px] rounded-full max-w-3xl mx-auto -z-10" />
-        <div className="container mx-auto px-4 text-center">
-          <h2 className="text-4xl md:text-6xl font-heading font-bold mb-8">Ready to scale your production?</h2>
-          <p className="text-xl text-zinc-400 mb-10 max-w-2xl mx-auto">Join the creators and teams using AI Video Factory to produce months of content in a single afternoon.</p>
+      <section className="bg-gray-900 py-16 text-center">
+        <div className="max-w-2xl mx-auto px-6">
+          <h2 className="text-3xl font-bold text-white mb-4">Ready to ship content at scale?</h2>
+          <p className="text-gray-400 mb-8 text-sm">Join creators producing weeks of video content in minutes.</p>
           <Link href="/studio">
-            <Button size="lg" className="h-16 px-10 text-lg bg-white text-black hover:bg-zinc-200 rounded-full font-semibold">
-              Launch Studio Workspace
+            <Button className="h-10 px-8 bg-amber-400 hover:bg-amber-500 text-amber-950 font-semibold">
+              Launch Studio — it's free
             </Button>
           </Link>
         </div>

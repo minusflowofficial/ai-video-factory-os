@@ -6,66 +6,53 @@ import { useGetSettings, useUpdateSettings } from "@workspace/api-client-react";
 import { useState, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getGetSettingsQueryKey } from "@workspace/api-client-react";
-import { Key, Database, Sliders, Save, CheckCircle2 } from "lucide-react";
+import { Key, Save, CheckCircle2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
   const { data: settings, isLoading } = useGetSettings();
   const updateSettings = useUpdateSettings();
+  const initRef = useRef(false);
 
-  const [formData, setFormData] = useState({
-    geminiKey: "",
-    openaiKey: "",
-    claudeKey: "",
-    groqKey: "",
-    pexelsKey: "",
-    pixabayKey: "",
-    unsplashKey: "",
-    defaultAiProvider: "gemini",
-    defaultDuration: "60s",
-    defaultAspectRatio: "9:16",
-    storageProvider: "supabase"
+  const [form, setForm] = useState({
+    geminiKey: "", openaiKey: "", claudeKey: "", groqKey: "", pexelsKey: "",
+    defaultAiProvider: "gemini", defaultDuration: "60s", defaultAspectRatio: "9:16", storageProvider: "supabase"
   });
 
-  const initRef = useRef(false);
+  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
   useEffect(() => {
     if (settings && !initRef.current) {
-      setFormData({
-        ...formData,
+      setForm(f => ({
+        ...f,
         defaultAiProvider: settings.defaultAiProvider || "gemini",
         defaultDuration: settings.defaultDuration || "60s",
         defaultAspectRatio: settings.defaultAspectRatio || "9:16",
-        storageProvider: settings.storageProvider || "supabase"
-      });
+        storageProvider: settings.storageProvider || "supabase",
+      }));
       initRef.current = true;
     }
   }, [settings]);
 
   const handleSave = () => {
-    const updateData: any = {};
-    if (formData.geminiKey) updateData.geminiKey = formData.geminiKey;
-    if (formData.openaiKey) updateData.openaiKey = formData.openaiKey;
-    if (formData.claudeKey) updateData.claudeKey = formData.claudeKey;
-    if (formData.groqKey) updateData.groqKey = formData.groqKey;
-    if (formData.pexelsKey) updateData.pexelsKey = formData.pexelsKey;
-    
-    updateData.defaultAiProvider = formData.defaultAiProvider;
-    updateData.defaultDuration = formData.defaultDuration;
-    updateData.defaultAspectRatio = formData.defaultAspectRatio;
-    updateData.storageProvider = formData.storageProvider;
+    const data: any = {
+      defaultAiProvider: form.defaultAiProvider,
+      defaultDuration: form.defaultDuration,
+      defaultAspectRatio: form.defaultAspectRatio,
+      storageProvider: form.storageProvider,
+    };
+    if (form.geminiKey) data.geminiKey = form.geminiKey;
+    if (form.openaiKey) data.openaiKey = form.openaiKey;
+    if (form.claudeKey) data.claudeKey = form.claudeKey;
+    if (form.groqKey)   data.groqKey   = form.groqKey;
+    if (form.pexelsKey) data.pexelsKey = form.pexelsKey;
 
-    updateSettings.mutate({ data: updateData }, {
+    updateSettings.mutate({ data }, {
       onSuccess: (updated) => {
         queryClient.setQueryData(getGetSettingsQueryKey(), updated);
-        toast("Settings saved successfully", {
-          icon: <CheckCircle2 className="text-emerald-500 w-4 h-4" />
-        });
-        setFormData(prev => ({
-          ...prev,
-          geminiKey: "", openaiKey: "", claudeKey: "", groqKey: "", pexelsKey: ""
-        }));
+        toast("Settings saved", { icon: <CheckCircle2 className="w-4 h-4 text-emerald-500" /> });
+        setForm(f => ({ ...f, geminiKey: "", openaiKey: "", claudeKey: "", groqKey: "", pexelsKey: "" }));
       }
     });
   };
@@ -73,62 +60,65 @@ export default function SettingsPage() {
   if (isLoading) {
     return (
       <AppLayout>
-        <div className="flex h-screen items-center justify-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div className="flex h-full items-center justify-center py-24">
+          <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />
         </div>
       </AppLayout>
     );
   }
 
+  const keys = [
+    { id: "openaiKey",  label: "OpenAI API Key",       isSet: settings?.openaiKeySet,  desc: "GPT-4 for scripting and refinement" },
+    { id: "claudeKey",  label: "Anthropic Claude Key",  isSet: settings?.claudeKeySet,  desc: "Creative ideation and structure" },
+    { id: "geminiKey",  label: "Google Gemini Key",     isSet: settings?.geminiKeySet,  desc: "Fast, cost-effective drafts" },
+    { id: "groqKey",    label: "Groq API Key",          isSet: settings?.groqKeySet,    desc: "Ultra-fast Llama inference" },
+    { id: "pexelsKey",  label: "Pexels API Key",        isSet: settings?.pexelsKeySet,  desc: "Optional — extra B-roll footage" },
+  ];
+
   return (
     <AppLayout>
-      <div className="container mx-auto px-4 py-8 max-w-4xl">
-        <div className="flex items-center justify-between mb-8">
+      <div className="p-6 max-w-3xl mx-auto">
+        <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-3xl font-heading font-bold text-white mb-2">Workspace Settings</h1>
-            <p className="text-zinc-400">Configure your API keys, integrations, and default preferences.</p>
+            <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
+            <p className="text-sm text-gray-500 mt-0.5">API keys and workspace defaults</p>
           </div>
-          <Button 
-            onClick={handleSave} 
+          <Button
+            onClick={handleSave}
             disabled={updateSettings.isPending}
-            className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20 font-semibold"
+            className="h-8 px-4 bg-amber-400 hover:bg-amber-500 text-amber-950 font-semibold text-xs"
           >
-            <Save className="w-4 h-4 mr-2" />
-            {updateSettings.isPending ? "Saving..." : "Save Settings"}
+            {updateSettings.isPending
+              ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Saving…</>
+              : <><Save className="w-3.5 h-3.5 mr-1.5" />Save Changes</>
+            }
           </Button>
         </div>
 
-        <div className="space-y-8">
-          {/* AI Providers */}
-          <div className="glass-panel p-6 rounded-2xl border border-white/5">
-            <h2 className="text-xl font-heading font-semibold text-white mb-6 flex items-center gap-2">
-              <Key className="w-5 h-5 text-amber-400" /> AI Provider Keys
-            </h2>
-            
-            <div className="space-y-6">
-              {[
-                { id: 'openaiKey', label: 'OpenAI API Key', isSet: settings?.openaiKeySet, desc: 'Used for advanced scripting and refinement.' },
-                { id: 'claudeKey', label: 'Anthropic Claude Key', isSet: settings?.claudeKeySet, desc: 'Used for creative ideation and structure.' },
-                { id: 'geminiKey', label: 'Google Gemini Key', isSet: settings?.geminiKeySet, desc: 'Used for fast, cost-effective initial drafts.' },
-                { id: 'groqKey', label: 'Groq API Key', isSet: settings?.groqKeySet, desc: 'Used for ultra-fast Llama inference.' },
-              ].map((provider) => (
-                <div key={provider.id} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
-                  <div className="md:col-span-4">
-                    <label className="text-sm font-medium text-white block mb-1">{provider.label}</label>
-                    <p className="text-xs text-zinc-500">{provider.desc}</p>
+        <div className="space-y-5">
+          {/* AI Keys */}
+          <div className="bg-white rounded-xl border border-gray-100">
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+              <Key className="w-4 h-4 text-gray-400" />
+              <h2 className="text-sm font-semibold text-gray-800">AI Provider Keys</h2>
+            </div>
+            <div className="p-5 space-y-4">
+              {keys.map(k => (
+                <div key={k.id} className="flex items-center gap-4">
+                  <div className="w-44 shrink-0">
+                    <p className="text-sm font-medium text-gray-800">{k.label}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{k.desc}</p>
                   </div>
-                  <div className="md:col-span-8 relative">
-                    <Input 
+                  <div className="flex-1 relative">
+                    <Input
                       type="password"
-                      placeholder={provider.isSet ? "•••••••••••••••••••• (Configured)" : "Enter API Key"}
-                      value={formData[provider.id as keyof typeof formData] as string}
-                      onChange={(e) => setFormData({...formData, [provider.id]: e.target.value})}
-                      className="bg-black/50 border-white/10 text-white pr-10"
+                      placeholder={k.isSet ? "••••••••••••• (Configured)" : "Enter key"}
+                      value={form[k.id as keyof typeof form] as string}
+                      onChange={e => set(k.id, e.target.value)}
+                      className="h-9 text-sm border-gray-200 bg-gray-50 pr-9"
                     />
-                    {provider.isSet && (
-                      <div className="absolute right-3 top-2.5 text-emerald-500" title="Key is configured">
-                        <CheckCircle2 className="w-5 h-5" />
-                      </div>
+                    {k.isSet && (
+                      <CheckCircle2 className="absolute right-2.5 top-2.5 w-4 h-4 text-emerald-500" />
                     )}
                   </div>
                 </div>
@@ -136,105 +126,49 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {/* Asset Sources */}
-          <div className="glass-panel p-6 rounded-2xl border border-white/5">
-            <h2 className="text-xl font-heading font-semibold text-white mb-6 flex items-center gap-2">
-              <Database className="w-5 h-5 text-sky-400" /> Asset & Media Sources
-            </h2>
-            
-            <div className="mb-6 p-4 bg-amber-500/8 border border-amber-500/20 rounded-xl">
-              <p className="text-sm text-amber-300 font-medium mb-1">Mixkit CDN Active</p>
-              <p className="text-xs text-zinc-400">Free cinematic videos, music tracks, and sound effects are fetched from Mixkit's CDN. No key required.</p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start mb-6">
-              <div className="md:col-span-4">
-                <label className="text-sm font-medium text-white block mb-1">Pexels API Key</label>
-                <p className="text-xs text-zinc-500">Optional: for additional premium B-roll footage.</p>
-              </div>
-              <div className="md:col-span-8 relative">
-                <Input 
-                  type="password"
-                  placeholder={settings?.pexelsKeySet ? "•••••••••••••••••••• (Configured)" : "Enter Pexels API Key (optional)"}
-                  value={formData.pexelsKey}
-                  onChange={(e) => setFormData({...formData, pexelsKey: e.target.value})}
-                  className="bg-black/50 border-white/10 text-white"
-                />
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
-              <div className="md:col-span-4">
-                <label className="text-sm font-medium text-white block mb-1">Storage Provider</label>
-                <p className="text-xs text-zinc-500">Where rendered videos are saved.</p>
-              </div>
-              <div className="md:col-span-8">
-                <Select value={formData.storageProvider} onValueChange={(v) => setFormData({...formData, storageProvider: v})}>
-                  <SelectTrigger className="bg-black/50 border-white/10 text-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-[#080b10] border-white/10">
-                    <SelectItem value="supabase">Supabase Storage</SelectItem>
-                    <SelectItem value="s3">AWS S3</SelectItem>
-                    <SelectItem value="gcs">Google Cloud Storage</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+          {/* Mixkit status */}
+          <div className="bg-amber-50 rounded-xl border border-amber-100 px-5 py-4 flex gap-3">
+            <div className="w-2 h-2 rounded-full bg-emerald-400 mt-1 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-gray-800">Mixkit CDN — Active (no key needed)</p>
+              <p className="text-xs text-gray-500 mt-0.5">Free cinematic videos, music, and SFX automatically sourced from Mixkit's library.</p>
             </div>
           </div>
 
           {/* Defaults */}
-          <div className="glass-panel p-6 rounded-2xl border border-white/5">
-            <h2 className="text-xl font-heading font-semibold text-white mb-6 flex items-center gap-2">
-              <Sliders className="w-5 h-5 text-emerald-400" /> Project Defaults
-            </h2>
-            
-            <div className="grid md:grid-cols-3 gap-6">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-zinc-300">Default AI Router</label>
-                <Select value={formData.defaultAiProvider} onValueChange={(v) => setFormData({...formData, defaultAiProvider: v})}>
-                  <SelectTrigger className="bg-black/50 border-white/10 text-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-[#080b10] border-white/10">
-                    <SelectItem value="gemini">Gemini Fast</SelectItem>
-                    <SelectItem value="claude">Claude Precision</SelectItem>
-                    <SelectItem value="openai">GPT-4 Logic</SelectItem>
-                    <SelectItem value="ensemble">Ensemble Chain (Best)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-zinc-300">Default Duration</label>
-                <Select value={formData.defaultDuration} onValueChange={(v) => setFormData({...formData, defaultDuration: v})}>
-                  <SelectTrigger className="bg-black/50 border-white/10 text-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-[#080b10] border-white/10">
-                    <SelectItem value="30s">30 Seconds</SelectItem>
-                    <SelectItem value="60s">60 Seconds</SelectItem>
-                    <SelectItem value="90s">90 Seconds</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-zinc-300">Default Format</label>
-                <Select value={formData.defaultAspectRatio} onValueChange={(v) => setFormData({...formData, defaultAspectRatio: v})}>
-                  <SelectTrigger className="bg-black/50 border-white/10 text-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-[#080b10] border-white/10">
-                    <SelectItem value="9:16">9:16 (Shorts/Reels)</SelectItem>
-                    <SelectItem value="16:9">16:9 (YouTube)</SelectItem>
-                    <SelectItem value="1:1">1:1 (Square)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+          <div className="bg-white rounded-xl border border-gray-100">
+            <div className="px-5 py-4 border-b border-gray-100">
+              <h2 className="text-sm font-semibold text-gray-800">Project Defaults</h2>
+            </div>
+            <div className="p-5 grid grid-cols-3 gap-4">
+              {[
+                {
+                  label: "AI Provider", key: "defaultAiProvider",
+                  opts: [["gemini","Gemini Fast"],["claude","Claude Precision"],["openai","GPT-4 Logic"],["ensemble","Ensemble"]]
+                },
+                {
+                  label: "Duration", key: "defaultDuration",
+                  opts: [["30s","30 Seconds"],["60s","60 Seconds"],["90s","90 Seconds"],["3min","3 Minutes"]]
+                },
+                {
+                  label: "Format", key: "defaultAspectRatio",
+                  opts: [["9:16","9:16 Shorts"],["16:9","16:9 YouTube"],["1:1","1:1 Square"]]
+                },
+              ].map(field => (
+                <div key={field.key}>
+                  <label className="text-xs font-medium text-gray-600 block mb-1.5">{field.label}</label>
+                  <Select value={form[field.key as keyof typeof form] as string} onValueChange={v => set(field.key, v)}>
+                    <SelectTrigger className="h-9 text-sm border-gray-200 bg-gray-50">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {field.opts.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ))}
             </div>
           </div>
-          
         </div>
       </div>
     </AppLayout>

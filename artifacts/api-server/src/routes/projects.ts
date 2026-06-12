@@ -238,7 +238,7 @@ router.post("/projects/:id/render", async (req, res): Promise<void> => {
       thumbnailUrl: mixkitThumbUrl(outputId),
       updatedAt: new Date(),
     }).where(eq(projectsTable.id, id));
-  }, 8000);
+  }, 800);
 
   res.json(serializeProject(updated));
 });

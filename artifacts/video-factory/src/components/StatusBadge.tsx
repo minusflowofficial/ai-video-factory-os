@@ -1,4 +1,3 @@
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 interface StatusBadgeProps {
@@ -9,44 +8,33 @@ interface StatusBadgeProps {
 export function StatusBadge({ status, className }: StatusBadgeProps) {
   if (!status) return null;
 
-  const normalizedStatus = status.toLowerCase();
+  const s = status.toLowerCase();
+  let cls = "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ";
 
-  let variant: "default" | "secondary" | "destructive" | "outline" = "default";
-  let colorClass = "";
-
-  switch (normalizedStatus) {
+  switch (s) {
     case "draft":
-      variant = "secondary";
-      colorClass = "bg-zinc-800 text-zinc-300 border-zinc-700";
-      break;
+      cls += "bg-gray-100 text-gray-600"; break;
     case "scripting":
     case "generating_assets":
     case "generating_voice":
-      variant = "outline";
-      colorClass = "bg-blue-950/30 text-blue-400 border-blue-800/50";
-      break;
+    case "fetching-assets":
+    case "voiceover":
+      cls += "bg-blue-50 text-blue-700"; break;
     case "rendering":
-      variant = "outline";
-      colorClass = "bg-yellow-950/30 text-yellow-400 border-yellow-800/50 animate-pulse";
-      break;
+      cls += "bg-amber-50 text-amber-700 animate-pulse"; break;
     case "completed":
-      variant = "outline";
-      colorClass = "bg-emerald-950/30 text-emerald-400 border-emerald-800/50";
-      break;
+      cls += "bg-emerald-50 text-emerald-700"; break;
     case "failed":
-      variant = "destructive";
-      colorClass = "bg-red-950/30 text-red-400 border-red-800/50";
-      break;
+      cls += "bg-red-50 text-red-700"; break;
+    case "processing":
+    case "pending":
+      cls += "bg-blue-50 text-blue-700"; break;
+    case "cancelled":
+      cls += "bg-gray-100 text-gray-500"; break;
     default:
-      variant = "secondary";
+      cls += "bg-gray-100 text-gray-600";
   }
 
-  // Format the text nicely
-  const displayText = status.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
-
-  return (
-    <Badge variant={variant} className={cn("font-medium", colorClass, className)}>
-      {displayText}
-    </Badge>
-  );
+  const display = status.replace(/-/g, " ").replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
+  return <span className={cn(cls, className)}>{display}</span>;
 }

@@ -10,100 +10,62 @@ interface MarketingLayoutProps {
 export function MarketingLayout({ children }: MarketingLayoutProps) {
   const [location] = useLocation();
 
-  const navigation = [
+  const nav = [
     { name: "Features", href: "/features" },
-    { name: "Pricing", href: "/pricing" },
-    { name: "About", href: "/about" },
-    { name: "Contact", href: "/contact" },
+    { name: "Pricing",  href: "/pricing" },
+    { name: "About",    href: "/about" },
+    { name: "Contact",  href: "/contact" },
   ];
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#080b10] selection:bg-primary/30">
-      <header className="sticky top-0 z-50 w-full border-b border-white/5 bg-[#080b10]/80 backdrop-blur-xl supports-[backdrop-filter]:bg-[#080b10]/60">
-        <div className="container mx-auto px-4 flex h-16 items-center justify-between">
-          <Link href="/" className="flex items-center gap-2.5 transition-opacity hover:opacity-80">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/20">
+    <div className="min-h-screen flex flex-col bg-white">
+      <header className="sticky top-0 z-50 bg-white border-b border-gray-100">
+        <div className="max-w-6xl mx-auto px-6 flex h-14 items-center justify-between">
+          <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+            <div className="w-7 h-7 rounded-md bg-amber-400 flex items-center justify-center">
               <Clapperboard className="w-4 h-4 text-white" />
             </div>
-            <span className="font-heading font-bold text-xl tracking-tight">AI Video Factory</span>
+            <span className="font-semibold text-gray-900 text-sm">AI Video Factory</span>
           </Link>
-          
-          <nav className="hidden md:flex items-center gap-8">
-            {navigation.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "text-sm font-medium transition-colors hover:text-white",
-                  location === item.href ? "text-white" : "text-zinc-400"
-                )}
-              >
+
+          <nav className="hidden md:flex items-center gap-6">
+            {nav.map((item) => (
+              <Link key={item.href} href={item.href} className={cn(
+                "text-sm transition-colors",
+                location === item.href ? "text-gray-900 font-medium" : "text-gray-500 hover:text-gray-900"
+              )}>
                 {item.name}
               </Link>
             ))}
           </nav>
-          
-          <div className="flex items-center gap-4">
-            <Link href="/studio" className="hidden sm:inline-flex text-sm font-medium text-zinc-300 hover:text-white transition-colors">
-              Log in
-            </Link>
+
+          <div className="flex items-center gap-3">
+            <Link href="/studio" className="text-sm text-gray-600 hover:text-gray-900">Sign in</Link>
             <Link href="/studio">
-              <Button className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-full px-6 font-semibold shadow-lg shadow-primary/20">
-                Get Started
+              <Button size="sm" className="bg-amber-400 hover:bg-amber-500 text-amber-950 font-semibold text-xs h-8 px-4">
+                Get started free →
               </Button>
             </Link>
           </div>
         </div>
       </header>
 
-      <main className="flex-1 w-full">{children}</main>
+      <main className="flex-1">{children}</main>
 
-      <footer className="bg-black/50 border-t border-white/5 pt-16 pb-8">
-        <div className="container mx-auto px-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-12">
-            <div className="space-y-4">
-              <div className="flex items-center gap-2.5">
-                <div className="w-6 h-6 rounded-md bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">
-                  <Clapperboard className="w-3 h-3 text-white" />
-                </div>
-                <span className="font-heading font-bold text-lg tracking-tight">AI Video Factory</span>
-              </div>
-              <p className="text-sm text-zinc-400 max-w-xs">
-                The cinematic AI video production studio for forward-thinking creators and enterprise teams.
-              </p>
+      <footer className="border-t border-gray-100 py-10 bg-white">
+        <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row justify-between gap-6 text-sm text-gray-400">
+          <div className="flex items-center gap-2">
+            <div className="w-5 h-5 rounded bg-amber-400 flex items-center justify-center">
+              <Clapperboard className="w-3 h-3 text-white" />
             </div>
-            
-            <div>
-              <h3 className="font-heading font-semibold mb-4 text-white">Product</h3>
-              <ul className="space-y-2 text-sm text-zinc-400">
-                <li><Link href="/features" className="hover:text-white transition-colors">Features</Link></li>
-                <li><Link href="/pricing" className="hover:text-white transition-colors">Pricing</Link></li>
-                <li><Link href="/studio" className="hover:text-white transition-colors">Studio</Link></li>
-              </ul>
-            </div>
-            
-            <div>
-              <h3 className="font-heading font-semibold mb-4 text-white">Company</h3>
-              <ul className="space-y-2 text-sm text-zinc-400">
-                <li><Link href="/about" className="hover:text-white transition-colors">About Us</Link></li>
-                <li><Link href="/contact" className="hover:text-white transition-colors">Contact</Link></li>
-                <li><a href="#" className="hover:text-white transition-colors">Blog</a></li>
-              </ul>
-            </div>
-            
-            <div>
-              <h3 className="font-heading font-semibold mb-4 text-white">Legal</h3>
-              <ul className="space-y-2 text-sm text-zinc-400">
-                <li><Link href="/privacy" className="hover:text-white transition-colors">Privacy Policy</Link></li>
-                <li><Link href="/terms" className="hover:text-white transition-colors">Terms of Service</Link></li>
-                <li><Link href="/disclaimer" className="hover:text-white transition-colors">Disclaimer</Link></li>
-                <li><Link href="/dmca" className="hover:text-white transition-colors">DMCA</Link></li>
-              </ul>
-            </div>
+            <span className="font-medium text-gray-600">AI Video Factory</span>
           </div>
-          <div className="pt-8 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-zinc-500">
-            <p>© {new Date().getFullYear()} AI Video Factory OS. All rights reserved.</p>
+          <div className="flex gap-6">
+            <Link href="/privacy" className="hover:text-gray-700">Privacy</Link>
+            <Link href="/terms" className="hover:text-gray-700">Terms</Link>
+            <Link href="/contact" className="hover:text-gray-700">Contact</Link>
           </div>
+          <p>© {new Date().getFullYear()} AI Video Factory OS</p>
         </div>
       </footer>
     </div>
