@@ -1,237 +1,134 @@
-import { useState, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { AppLayout } from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import {
-  Scissors, Youtube, Loader2, ChevronDown, ChevronUp,
-  Download, Zap, Copy, Check, AlertCircle, Clock,
-  TrendingUp, MessageSquare, Share2, Eye, Settings2,
+  Scissors, Loader2, Download, Zap, AlertCircle,
+  CheckCircle2, Clock, TrendingUp, Sparkles, Film,
+  ChevronDown, ChevronUp, Copy, Check,
 } from "lucide-react";
 
-// ── Types ──────────────────────────────────────────────────────────────────
-interface TranscriptSegment { start: string; end: string; text: string; }
-interface VideoInfo { name: string; author: string; duration: string; thumbnailUrl?: { hqdefault?: string }; }
-interface TranscriptData {
-  videoId: string;
-  videoInfo: VideoInfo;
-  language_code: { code: string; name: string }[];
-  transcripts: Record<string, { custom: TranscriptSegment[] }>;
+// ── Types ──────────────────────────────────────────────────────────────────────
+interface ClipResult {
+  id: number; title: string; hook: string; hookType: string;
+  viralScore: number; startTime: string; endTime: string; duration: string;
+  status: "pending" | "processing" | "done" | "error";
+  downloadToken?: string; sizeMb?: number; error?: string;
 }
 
-interface ViralClip {
-  id: number;
-  startTime: string;
-  endTime: string;
-  duration: string;
-  topic: string;
-  hookType: string;
-  viralScore: number;
-  platform: string;
-  hook: string;
-  punchline: string;
-  whyItWorks: string;
-  ctaOptions: string[];
-  titleIdeas: string[];
-  hashtags: string[];
-  editorNotes: string;
-  captionStyle?: string;
-  hookStrength?: number;
-  retentionScore?: number;
-  shareability?: number;
-  commentPotential?: number;
+interface JobStatus {
+  id: string;
+  status: "queued" | "downloading" | "transcribing" | "analyzing" | "creating" | "done" | "error";
+  stepLabel: string; progress: number;
+  totalClips: number; doneClips: number;
+  videoTitle?: string; error?: string;
+  clips: ClipResult[];
 }
 
-// ── Options config ─────────────────────────────────────────────────────────
-const NUM_CLIPS_OPTIONS   = [5, 10, 15, 20];
-const ASPECT_RATIOS       = [{ val: "9:16", label: "9:16", sub: "Portrait" }, { val: "1:1", label: "1:1", sub: "Square" }, { val: "16:9", label: "16:9", sub: "Landscape" }];
-const MIN_DURATIONS       = [{ val: "20", label: "20s" }, { val: "30", label: "30s" }, { val: "45", label: "45s" }, { val: "60", label: "60s" }, { val: "90", label: "90s" }];
-const CAPTION_STYLES      = [
-  { val: "Bold Yellow",   label: "Bold Yellow",   color: "bg-yellow-100 text-yellow-800 border-yellow-300" },
-  { val: "White Outline", label: "White Outline",  color: "bg-gray-100 text-gray-800 border-gray-300" },
-  { val: "Minimal",       label: "Minimal",        color: "bg-slate-100 text-slate-600 border-slate-200" },
-  { val: "Cinematic",     label: "Cinematic",      color: "bg-zinc-800 text-zinc-100 border-zinc-600" },
-  { val: "Neon",          label: "Neon",           color: "bg-purple-100 text-purple-800 border-purple-300" },
-  { val: "Fire",          label: "Fire",           color: "bg-orange-100 text-orange-800 border-orange-300" },
+// ── Config options ─────────────────────────────────────────────────────────────
+const NUM_CLIPS = [3, 5, 8, 10];
+const ASPECT_RATIOS = [
+  { val: "9:16", icon: "▯", label: "9:16", sub: "Portrait" },
+  { val: "1:1",  icon: "□", label: "1:1",  sub: "Square"   },
+  { val: "16:9", icon: "▭", label: "16:9", sub: "Landscape" },
 ];
-const HOOK_TYPES = ["Any", "Curiosity", "Shock", "Debate", "Story", "Emotional", "Educational", "Contrarian", "Inspirational", "Controversial", "Fear", "Warning"];
+const CAPTION_STYLES = [
+  { val: "Bold Yellow",   dot: "bg-yellow-400",  ring: "ring-yellow-400"  },
+  { val: "White Outline", dot: "bg-white",        ring: "ring-white"       },
+  { val: "Minimal",       dot: "bg-slate-300",    ring: "ring-slate-400"   },
+  { val: "Cinematic",     dot: "bg-zinc-800 border border-zinc-500", ring: "ring-zinc-400" },
+  { val: "Neon",          dot: "bg-green-400",    ring: "ring-green-400"   },
+  { val: "Fire",          dot: "bg-orange-500",   ring: "ring-orange-500"  },
+];
+const HOOK_TYPES = ["Any", "Curiosity", "Shock", "Story", "Emotional", "Educational", "Inspirational", "Controversial"];
+const MIN_DURATIONS = [{ val: "20", label: "20s" }, { val: "30", label: "30s" }, { val: "45", label: "45s" }, { val: "60", label: "60s" }];
 
 const HOOK_COLORS: Record<string, string> = {
-  Curiosity:      "bg-blue-100 text-blue-700",
-  Shock:          "bg-red-100 text-red-700",
-  Debate:         "bg-orange-100 text-orange-700",
-  Story:          "bg-purple-100 text-purple-700",
-  Emotional:      "bg-pink-100 text-pink-700",
-  Educational:    "bg-green-100 text-green-700",
-  Contrarian:     "bg-yellow-100 text-yellow-700",
-  Inspirational:  "bg-emerald-100 text-emerald-700",
-  Controversial:  "bg-rose-100 text-rose-700",
-  Fear:           "bg-gray-100 text-gray-700",
-  Warning:        "bg-amber-100 text-amber-700",
+  Curiosity: "bg-blue-500/20 text-blue-300 border-blue-500/30",
+  Shock: "bg-red-500/20 text-red-300 border-red-500/30",
+  Story: "bg-purple-500/20 text-purple-300 border-purple-500/30",
+  Emotional: "bg-pink-500/20 text-pink-300 border-pink-500/30",
+  Educational: "bg-green-500/20 text-green-300 border-green-500/30",
+  Inspirational: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
+  Controversial: "bg-rose-500/20 text-rose-300 border-rose-500/30",
+  Contrarian: "bg-yellow-500/20 text-yellow-300 border-yellow-500/30",
 };
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-function formatDuration(secs: number) {
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  const s = secs % 60;
-  return h > 0
-    ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
-    : `${m}:${String(s).padStart(2, "0")}`;
+const PIPELINE_STEPS = [
+  { key: "downloading",  label: "Downloading video"  },
+  { key: "transcribing", label: "Fetching transcript" },
+  { key: "analyzing",   label: "AI analysis"         },
+  { key: "creating",    label: "Creating clips"       },
+  { key: "done",        label: "Clips ready!"         },
+];
+
+function isStepDone(jobStatus: string, stepKey: string) {
+  const order = ["queued", "downloading", "transcribing", "analyzing", "creating", "done"];
+  return order.indexOf(jobStatus) > order.indexOf(stepKey);
+}
+function isStepActive(jobStatus: string, stepKey: string) {
+  return jobStatus === stepKey;
 }
 
-function ScorePill({ label, value }: { label: string; value?: number }) {
-  if (!value) return null;
-  const color = value >= 8 ? "text-emerald-600" : value >= 6 ? "text-amber-600" : "text-gray-400";
-  return (
-    <div className="flex flex-col items-center">
-      <span className={cn("font-bold text-base", color)}>{value}/10</span>
-      <span className="text-[10px] text-gray-400 leading-tight text-center">{label}</span>
-    </div>
-  );
-}
-
-function ToggleChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "px-3 py-1.5 rounded-lg border text-xs font-medium transition-all",
-        active ? "bg-violet-500 border-violet-500 text-white shadow-sm" : "border-gray-200 text-gray-600 bg-white hover:border-violet-300 hover:text-violet-600"
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
-// ── Main Component ─────────────────────────────────────────────────────────
+// ── Main Page ──────────────────────────────────────────────────────────────────
 export default function ClipperPage() {
-  const [url, setUrl]         = useState("");
-  const [language, setLang]   = useState("en");
-  const [fetching, setFetch]  = useState(false);
-  const [analyzing, setAna]   = useState(false);
-  const [transcript, setTx]   = useState<TranscriptData | null>(null);
-  const [clips, setClips]     = useState<ViralClip[]>([]);
-  const [error, setError]     = useState<string | null>(null);
-  const [expanded, setExp]    = useState<number | null>(null);
-  const [copiedId, setCopied] = useState<string | null>(null);
+  const [url,          setUrl]         = useState("");
+  const [numClips,     setNumClips]    = useState(5);
+  const [aspectRatio,  setAspect]      = useState("9:16");
+  const [captionStyle, setCaption]     = useState("Bold Yellow");
+  const [hookFilter,   setHookFilter]  = useState("Any");
+  const [minDuration,  setMinDur]      = useState("30");
 
-  // Options
-  const [numClips,     setNumClips]     = useState(10);
-  const [aspectRatio,  setAspectRatio]  = useState("9:16");
-  const [minDuration,  setMinDuration]  = useState("30");
-  const [captionStyle, setCaptionStyle] = useState("Bold Yellow");
-  const [hookFilter,   setHookFilter]   = useState("Any");
+  const [jobId,        setJobId]       = useState<string | null>(null);
+  const [job,          setJob]         = useState<JobStatus | null>(null);
+  const [starting,     setStarting]    = useState(false);
+  const [error,        setError]       = useState<string | null>(null);
+  const [expanded,     setExpanded]    = useState<number | null>(null);
+  const [copied,       setCopied]      = useState<string | null>(null);
 
-  // Clip download state
-  const [clipDialog,   setClipDialog]   = useState<ViralClip | null>(null);
-  const [clipVideoUrl, setClipVidUrl]   = useState("");
-  const [clipAR,       setClipAR]       = useState("9:16");
-  const [clipping,     setClipping]     = useState(false);
-  const [clipToken,    setClipToken]    = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const txRef = useRef<HTMLDivElement>(null);
+  // Poll job status
+  useEffect(() => {
+    if (!jobId) return;
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/clipper/status/${jobId}`);
+        const data: JobStatus = await res.json();
+        setJob(data);
+        if (data.status === "done" || data.status === "error") {
+          clearInterval(pollRef.current!);
+        }
+      } catch { /* ignore network hiccups */ }
+    }, 2000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [jobId]);
 
-  // ── Fetch Transcript ─────────────────────────────────────────────────────
-  const fetchTranscript = async () => {
+  const startPipeline = async () => {
     if (!url.trim()) return;
     setError(null);
-    setFetch(true);
-    setTx(null);
-    setClips([]);
+    setJob(null);
+    setJobId(null);
+    setExpanded(null);
+    setStarting(true);
     try {
-      const res = await fetch("/api/clipper/transcript", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: url.trim() }),
-        signal: AbortSignal.timeout(30_000),
-      });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error ?? "Failed to fetch transcript"); return; }
-      setTx(data);
-      if (data.language_code?.length) setLang(data.language_code[0].code);
-    } catch (e: any) {
-      setError(e?.name === "TimeoutError" ? "Request timed out. Check your connection." : "Network error. Please try again.");
-    } finally {
-      setFetch(false);
-    }
-  };
-
-  // ── Analyze Transcript ───────────────────────────────────────────────────
-  const analyzeTranscript = async () => {
-    if (!transcript) return;
-    setError(null);
-    setAna(true);
-    setClips([]);
-    setExp(null);
-    try {
-      // Trim transcript to max 150 segments to avoid 413 payload errors
-      const rawSegs = transcript.transcripts[language]?.custom
-        ?? transcript.transcripts["en"]?.custom
-        ?? [];
-      const trimmedSegs = rawSegs.slice(0, 150);
-      const trimmedTranscripts = {
-        [language]: { custom: trimmedSegs },
-      };
-
-      const res = await fetch("/api/clipper/analyze", {
+      const res = await fetch("/api/clipper/process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          transcripts:  trimmedTranscripts,
-          videoInfo:    transcript.videoInfo,
-          language,
-          numClips,
-          minDuration:  parseInt(minDuration),
-          captionStyle,
-          hookFilter:   hookFilter === "Any" ? null : hookFilter,
+          url: url.trim(), numClips, aspectRatio, captionStyle,
+          hookFilter: hookFilter === "Any" ? null : hookFilter,
+          minDuration: parseInt(minDuration),
         }),
-        signal: AbortSignal.timeout(120_000),
+        signal: AbortSignal.timeout(15_000),
       });
       const data = await res.json();
-      if (!res.ok) { setError(data.error ?? "AI analysis failed"); return; }
-      const found: ViralClip[] = data.clips ?? [];
-      setClips(found);
-      if (!found.length) setError("No viral clips found. Try a longer video or different settings.");
-      else {
-        // Sync clip dialog AR with current aspect ratio
-        setClipAR(aspectRatio);
-      }
+      if (!res.ok) { setError(data.error ?? "Failed to start"); return; }
+      setJobId(data.jobId);
     } catch (e: any) {
-      setError(e?.name === "TimeoutError"
-        ? "AI analysis timed out (>2 min). Try a shorter video."
-        : "AI analysis failed. Please try again.");
+      setError(e?.name === "TimeoutError" ? "Request timed out." : e.message ?? "Failed to start");
     } finally {
-      setAna(false);
-    }
-  };
-
-  // ── Extract Clip ─────────────────────────────────────────────────────────
-  const extractClip = async () => {
-    if (!clipDialog || !clipVideoUrl.trim()) return;
-    setClipping(true);
-    setClipToken(null);
-    try {
-      const res = await fetch("/api/clipper/clip", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          videoUrl:    clipVideoUrl.trim(),
-          startTime:   clipDialog.startTime,
-          endTime:     clipDialog.endTime,
-          aspectRatio: clipAR,
-          clipId:      clipDialog.id,
-        }),
-        signal: AbortSignal.timeout(300_000),
-      });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error ?? "Clip extraction failed"); return; }
-      setClipToken(data.downloadToken);
-    } catch {
-      setError("Clip extraction failed. Please try again.");
-    } finally {
-      setClipping(false);
+      setStarting(false);
     }
   };
 
@@ -241,528 +138,397 @@ export default function ClipperPage() {
     setTimeout(() => setCopied(null), 1500);
   };
 
-  const segments  = transcript
-    ? (transcript.transcripts[language]?.custom ?? transcript.transcripts["en"]?.custom ?? [])
-    : [];
-  const fullText  = segments.map(s => s.text).join(" ");
-  const wordCount = fullText.split(/\s+/).filter(Boolean).length;
-
-  const displayedClips = clips
-    .filter(c => hookFilter === "Any" || c.hookType === hookFilter)
-    .sort((a, b) => b.viralScore - a.viralScore);
+  const isRunning = job && !["done", "error"].includes(job.status);
+  const isDone    = job?.status === "done";
+  const isError   = job?.status === "error";
 
   return (
     <AppLayout>
-      <div className="min-h-screen bg-gray-50">
-        {/* Header */}
-        <div className="border-b border-gray-100 bg-white px-6 py-4">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-violet-500 flex items-center justify-center">
-              <Scissors className="w-4 h-4 text-white" />
-            </div>
-            <div>
-              <h1 className="text-base font-semibold text-gray-900">Clipper</h1>
-              <p className="text-xs text-gray-500">YouTube Transcript → AI Viral Clip Analysis → Face-Centered Clipping</p>
+      <div className="min-h-screen bg-[#0f0f13]">
+
+        {/* ── Hero Header ──────────────────────────────────────────────── */}
+        <div className="relative overflow-hidden border-b border-white/5">
+          <div className="absolute inset-0 bg-gradient-to-br from-violet-900/40 via-purple-900/20 to-transparent pointer-events-none" />
+          <div className="relative px-8 py-8">
+            <div className="flex items-center gap-3 mb-1">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/30">
+                <Scissors className="w-4.5 h-4.5 text-white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-white tracking-tight">AI Clipper</h1>
+                <p className="text-xs text-white/40">Paste a YouTube link → get viral clips with captions, ready to post</p>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="max-w-5xl mx-auto p-6 space-y-5">
-          {/* Step 1: URL */}
-          <div className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm">
-            <div className="flex items-center gap-2 mb-4">
-              <Youtube className="w-4 h-4 text-red-500" />
-              <span className="font-medium text-sm text-gray-900">Step 1 — Paste YouTube URL</span>
-            </div>
-            <div className="flex gap-3">
-              <Input
-                value={url}
-                onChange={e => setUrl(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && fetchTranscript()}
-                placeholder="https://youtube.com/watch?v=... or video ID"
-                className="flex-1 h-9 text-sm"
-              />
-              <Button
-                onClick={fetchTranscript}
-                disabled={fetching || !url.trim()}
-                className="bg-violet-500 hover:bg-violet-600 text-white h-9 px-5 text-sm shrink-0"
-              >
-                {fetching ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Fetching…</> : "Fetch Transcript"}
-              </Button>
+        <div className="max-w-3xl mx-auto px-6 py-8 space-y-6">
+
+          {/* ── URL Input ─────────────────────────────────────────────── */}
+          <div className="relative group">
+            <div className="absolute -inset-0.5 bg-gradient-to-r from-violet-600 to-purple-600 rounded-2xl blur opacity-30 group-focus-within:opacity-60 transition-opacity" />
+            <div className="relative bg-[#18181f] rounded-2xl border border-white/10 p-5">
+              <label className="block text-[11px] font-semibold text-white/40 uppercase tracking-widest mb-3">
+                YouTube URL
+              </label>
+              <div className="flex gap-3">
+                <input
+                  value={url}
+                  onChange={e => setUrl(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && !starting && !isRunning && startPipeline()}
+                  placeholder="https://youtube.com/watch?v=... or paste a video ID"
+                  className="flex-1 bg-[#0f0f13] border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:border-violet-500/60 focus:ring-1 focus:ring-violet-500/30 transition-all"
+                  disabled={!!isRunning}
+                />
+                <Button
+                  onClick={startPipeline}
+                  disabled={!url.trim() || starting || !!isRunning}
+                  className="shrink-0 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 text-white font-semibold px-6 py-3 h-auto rounded-xl shadow-lg shadow-violet-500/25 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                >
+                  {starting || isRunning
+                    ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Working…</>
+                    : <><Sparkles className="w-4 h-4 mr-2" />Create Clips</>}
+                </Button>
+              </div>
             </div>
           </div>
 
-          {/* Error */}
-          {error && (
-            <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-start gap-2.5">
-              <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
-              <span className="text-sm text-red-700">{error}</span>
-            </div>
-          )}
+          {/* ── Config Grid ───────────────────────────────────────────── */}
+          {!jobId && (
+            <div className="grid grid-cols-2 gap-4">
 
-          {/* Video Info + Transcript */}
-          {transcript && (
-            <>
-              <div className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm">
-                <div className="flex gap-4">
-                  {transcript.videoInfo.thumbnailUrl?.hqdefault && (
-                    <img
-                      src={`/api/proxy?url=${encodeURIComponent(transcript.videoInfo.thumbnailUrl.hqdefault)}`}
-                      alt="thumbnail"
-                      className="w-32 h-20 object-cover rounded-lg shrink-0 bg-gray-100"
-                      onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
-                    />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <h2 className="font-semibold text-gray-900 text-sm leading-snug line-clamp-2">{transcript.videoInfo.name}</h2>
-                    <p className="text-xs text-gray-500 mt-1">{transcript.videoInfo.author}</p>
-                    <div className="flex items-center gap-4 mt-2">
-                      <div className="flex items-center gap-1 text-xs text-gray-500">
-                        <Clock className="w-3 h-3" />
-                        {formatDuration(parseInt(transcript.videoInfo.duration ?? "0"))}
-                      </div>
-                      <span className="text-xs text-gray-500">{wordCount.toLocaleString()} words</span>
-                      {transcript.language_code?.length > 1 && (
-                        <select value={language} onChange={e => setLang(e.target.value)}
-                          className="text-xs border border-gray-200 rounded px-2 py-0.5 bg-white">
-                          {transcript.language_code.map(l => (
-                            <option key={l.code} value={l.code}>{l.name}</option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Transcript Viewer */}
-              <div className="bg-white rounded-xl border border-gray-100 shadow-sm">
-                <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
-                  <span className="text-sm font-medium text-gray-900">Transcript ({segments.length} segments)</span>
-                  <Button size="sm" variant="ghost" onClick={() => copyText(fullText, "full")} className="h-7 text-xs gap-1">
-                    {copiedId === "full" ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                    Copy all
-                  </Button>
-                </div>
-                <div ref={txRef} className="max-h-52 overflow-y-auto p-5 space-y-1">
-                  {segments.map((seg, i) => (
-                    <div key={i} className="flex gap-3 text-sm hover:bg-gray-50 rounded px-1 py-0.5">
-                      <span className="text-xs text-violet-500 font-mono shrink-0 w-16 mt-0.5">{seg.start}</span>
-                      <span className="text-gray-700 leading-relaxed">{seg.text}</span>
-                    </div>
+              {/* Clips count */}
+              <div className="bg-[#18181f] rounded-2xl border border-white/8 p-4">
+                <p className="text-[10px] font-bold text-white/35 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                  <Film className="w-3 h-3" /> Number of Clips
+                </p>
+                <div className="flex gap-2">
+                  {NUM_CLIPS.map(n => (
+                    <button key={n} onClick={() => setNumClips(n)}
+                      className={cn("flex-1 py-2 rounded-lg text-sm font-bold transition-all",
+                        numClips === n
+                          ? "bg-violet-600 text-white shadow-md shadow-violet-500/30"
+                          : "bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/80"
+                      )}>
+                      {n}
+                    </button>
                   ))}
                 </div>
               </div>
 
-              {/* Step 2: Options + Analyze */}
-              <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-                <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
-                  <Settings2 className="w-4 h-4 text-gray-400" />
-                  <span className="font-medium text-sm text-gray-900">Step 2 — Configure &amp; Analyze</span>
-                  <span className="text-xs text-gray-400 ml-auto">Powered by Qwen Flash</span>
-                </div>
-
-                <div className="p-5 space-y-5">
-                  {/* Row 1: Number of clips + Min duration */}
-                  <div className="grid grid-cols-2 gap-5">
-                    <div>
-                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Number of Clips</p>
-                      <div className="flex gap-2">
-                        {NUM_CLIPS_OPTIONS.map(n => (
-                          <ToggleChip key={n} active={numClips === n} onClick={() => setNumClips(n)}>{n}</ToggleChip>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Min Clip Duration</p>
-                      <div className="flex gap-2">
-                        {MIN_DURATIONS.map(d => (
-                          <ToggleChip key={d.val} active={minDuration === d.val} onClick={() => setMinDuration(d.val)}>{d.label}</ToggleChip>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Row 2: Aspect ratio */}
-                  <div>
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Clip Aspect Ratio</p>
-                    <div className="flex gap-2">
-                      {ASPECT_RATIOS.map(ar => (
-                        <button
-                          key={ar.val}
-                          onClick={() => { setAspectRatio(ar.val); setClipAR(ar.val); }}
-                          className={cn(
-                            "flex flex-col items-center gap-0.5 px-4 py-2 rounded-lg border text-xs font-medium transition-all",
-                            aspectRatio === ar.val
-                              ? "bg-violet-500 border-violet-500 text-white"
-                              : "border-gray-200 text-gray-600 bg-white hover:border-violet-300"
-                          )}
-                        >
-                          <span className="font-bold">{ar.label}</span>
-                          <span className={cn("text-[10px]", aspectRatio === ar.val ? "text-violet-200" : "text-gray-400")}>{ar.sub}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Row 3: Caption style */}
-                  <div>
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Caption Style</p>
-                    <div className="flex flex-wrap gap-2">
-                      {CAPTION_STYLES.map(s => (
-                        <button
-                          key={s.val}
-                          onClick={() => setCaptionStyle(s.val)}
-                          className={cn(
-                            "px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all",
-                            captionStyle === s.val
-                              ? "ring-2 ring-violet-400 ring-offset-1 " + s.color
-                              : s.color + " opacity-70 hover:opacity-100"
-                          )}
-                        >
-                          {s.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Row 4: Hook type filter */}
-                  <div>
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Hook Type Focus</p>
-                    <div className="flex flex-wrap gap-2">
-                      {HOOK_TYPES.map(h => (
-                        <ToggleChip key={h} active={hookFilter === h} onClick={() => setHookFilter(h)}>{h}</ToggleChip>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Analyze button */}
-                  <div className="pt-1 border-t border-gray-100 flex items-center justify-between">
-                    <p className="text-xs text-gray-400">
-                      {numClips} clips · {minDuration}s+ · {aspectRatio} · {captionStyle}
-                      {hookFilter !== "Any" ? ` · ${hookFilter} hooks` : ""}
-                    </p>
-                    <Button
-                      onClick={analyzeTranscript}
-                      disabled={analyzing}
-                      className="bg-amber-400 hover:bg-amber-500 text-amber-950 font-semibold text-sm h-9 px-6"
-                    >
-                      {analyzing
-                        ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Analyzing…</>
-                        : <><Zap className="w-3.5 h-3.5 mr-1.5" />Find Viral Clips</>}
-                    </Button>
-                  </div>
-                  {analyzing && (
-                    <p className="text-xs text-gray-400 -mt-3">
-                      AI is scanning {segments.length} segments for viral opportunities… (may take 15–30 seconds)
-                    </p>
-                  )}
+              {/* Min duration */}
+              <div className="bg-[#18181f] rounded-2xl border border-white/8 p-4">
+                <p className="text-[10px] font-bold text-white/35 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                  <Clock className="w-3 h-3" /> Min Duration
+                </p>
+                <div className="flex gap-2">
+                  {MIN_DURATIONS.map(d => (
+                    <button key={d.val} onClick={() => setMinDur(d.val)}
+                      className={cn("flex-1 py-2 rounded-lg text-sm font-bold transition-all",
+                        minDuration === d.val
+                          ? "bg-violet-600 text-white shadow-md shadow-violet-500/30"
+                          : "bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/80"
+                      )}>
+                      {d.label}
+                    </button>
+                  ))}
                 </div>
               </div>
-            </>
+
+              {/* Aspect ratio */}
+              <div className="bg-[#18181f] rounded-2xl border border-white/8 p-4">
+                <p className="text-[10px] font-bold text-white/35 uppercase tracking-widest mb-3">
+                  Aspect Ratio
+                </p>
+                <div className="flex gap-3">
+                  {ASPECT_RATIOS.map(ar => (
+                    <button key={ar.val} onClick={() => setAspect(ar.val)}
+                      className={cn("flex-1 flex flex-col items-center gap-1 py-3 rounded-xl border transition-all",
+                        aspectRatio === ar.val
+                          ? "bg-violet-600/20 border-violet-500/60 text-violet-300"
+                          : "bg-white/3 border-white/8 text-white/40 hover:border-white/20 hover:text-white/60"
+                      )}>
+                      <span className="text-2xl leading-none">{ar.icon}</span>
+                      <span className="text-xs font-bold">{ar.label}</span>
+                      <span className="text-[9px] opacity-60">{ar.sub}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Caption style */}
+              <div className="bg-[#18181f] rounded-2xl border border-white/8 p-4">
+                <p className="text-[10px] font-bold text-white/35 uppercase tracking-widest mb-3">
+                  Caption Style
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {CAPTION_STYLES.map(s => (
+                    <button key={s.val} onClick={() => setCaption(s.val)}
+                      className={cn("flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all",
+                        captionStyle === s.val
+                          ? "bg-white/10 border-white/30 text-white"
+                          : "bg-white/3 border-white/8 text-white/40 hover:border-white/20 hover:text-white/60"
+                      )}>
+                      <span className={cn("w-3 h-3 rounded-full flex-shrink-0", s.dot,
+                        captionStyle === s.val ? `ring-2 ring-offset-1 ring-offset-[#18181f] ${s.ring}` : ""
+                      )} />
+                      {s.val}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Hook type - full width */}
+              <div className="col-span-2 bg-[#18181f] rounded-2xl border border-white/8 p-4">
+                <p className="text-[10px] font-bold text-white/35 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                  <TrendingUp className="w-3 h-3" /> Hook Type Focus
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {HOOK_TYPES.map(h => (
+                    <button key={h} onClick={() => setHookFilter(h)}
+                      className={cn("px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all",
+                        hookFilter === h
+                          ? "bg-violet-600/30 border-violet-500/50 text-violet-300"
+                          : "bg-white/3 border-white/8 text-white/40 hover:border-white/20 hover:text-white/60"
+                      )}>
+                      {h}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
           )}
 
-          {/* Viral Clips Results */}
-          {clips.length > 0 && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-violet-500" />
-                  <h2 className="font-semibold text-sm text-gray-900">
-                    {displayedClips.length} Viral Clips Found
-                  </h2>
-                  <span className="text-xs text-gray-400">
-                    {aspectRatio} · {captionStyle}
-                  </span>
+          {/* ── Error ─────────────────────────────────────────────────── */}
+          {error && (
+            <div className="flex items-start gap-3 bg-red-500/10 border border-red-500/25 rounded-xl px-4 py-3">
+              <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
+              <p className="text-sm text-red-300">{error}</p>
+            </div>
+          )}
+
+          {/* ── Progress ──────────────────────────────────────────────── */}
+          {job && (
+            <div className="bg-[#18181f] rounded-2xl border border-white/8 p-5 space-y-5">
+
+              {/* Progress bar */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-white/60">{job.stepLabel}</span>
+                  <span className="text-xs font-bold text-violet-400">{job.progress}%</span>
                 </div>
-                {hookFilter !== "Any" && (
-                  <button onClick={() => setHookFilter("Any")} className="text-xs text-violet-500 hover:underline">
-                    Show all hooks
-                  </button>
-                )}
+                <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-violet-500 to-purple-500 rounded-full transition-all duration-700"
+                    style={{ width: `${job.progress}%` }}
+                  />
+                </div>
               </div>
 
-              {/* Summary Table */}
-              <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-100 bg-gray-50">
-                      <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 w-8">#</th>
-                      <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500">Time</th>
-                      <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500">Topic</th>
-                      <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500">Hook Type</th>
-                      <th className="text-center px-4 py-2.5 text-xs font-medium text-gray-500">Score</th>
-                      <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500">Caption</th>
-                      <th className="px-4 py-2.5 w-24"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {displayedClips.map(clip => (
-                      <tr
-                        key={clip.id}
-                        className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer"
-                        onClick={() => setExp(expanded === clip.id ? null : clip.id)}
-                      >
-                        <td className="px-4 py-3 text-xs text-gray-400 font-mono">{clip.id}</td>
-                        <td className="px-4 py-3">
-                          <span className="font-mono text-xs text-violet-600">{clip.startTime}</span>
-                          <span className="text-gray-300 mx-1">→</span>
-                          <span className="font-mono text-xs text-violet-600">{clip.endTime}</span>
-                          <span className="text-xs text-gray-400 ml-1">({clip.duration})</span>
-                        </td>
-                        <td className="px-4 py-3 text-xs text-gray-700 max-w-[180px] truncate">{clip.topic}</td>
-                        <td className="px-4 py-3">
-                          <span className={cn(
-                            "text-xs px-2 py-0.5 rounded-full font-medium",
-                            HOOK_COLORS[clip.hookType] ?? "bg-gray-100 text-gray-600"
+              {/* Step timeline */}
+              <div className="flex items-center gap-0">
+                {PIPELINE_STEPS.map((step, i) => {
+                  const done   = isStepDone(job.status, step.key);
+                  const active = isStepActive(job.status, step.key);
+                  return (
+                    <div key={step.key} className="flex items-center flex-1 min-w-0">
+                      <div className="flex flex-col items-center gap-1 flex-shrink-0">
+                        <div className={cn(
+                          "w-6 h-6 rounded-full flex items-center justify-center transition-all",
+                          done   ? "bg-emerald-500" :
+                          active ? "bg-violet-500 shadow-md shadow-violet-500/40 animate-pulse" :
+                                   "bg-white/10"
+                        )}>
+                          {done
+                            ? <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+                            : active
+                              ? <Loader2 className="w-3 h-3 text-white animate-spin" />
+                              : <span className="w-1.5 h-1.5 rounded-full bg-white/30" />}
+                        </div>
+                        <span className={cn("text-[9px] font-medium text-center leading-tight max-w-[60px]",
+                          done ? "text-emerald-400" : active ? "text-violet-300" : "text-white/25"
+                        )}>
+                          {step.label}
+                        </span>
+                      </div>
+                      {i < PIPELINE_STEPS.length - 1 && (
+                        <div className={cn("h-px flex-1 mx-1 mb-4", done ? "bg-emerald-500/50" : "bg-white/8")} />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Video title */}
+              {job.videoTitle && (
+                <div className="bg-white/3 rounded-lg px-4 py-2 text-sm text-white/60 truncate">
+                  🎬 {job.videoTitle}
+                </div>
+              )}
+
+              {/* Creating clips sub-progress */}
+              {(job.status === "creating" || job.status === "done") && job.totalClips > 0 && (
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 h-1 bg-white/5 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-emerald-500 to-green-400 rounded-full transition-all duration-500"
+                      style={{ width: `${(job.doneClips / job.totalClips) * 100}%` }}
+                    />
+                  </div>
+                  <span className="text-xs text-white/40 shrink-0">
+                    {job.doneClips}/{job.totalClips} clips
+                  </span>
+                </div>
+              )}
+
+              {/* Error */}
+              {isError && (
+                <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                  <AlertCircle className="w-3.5 h-3.5 text-red-400 mt-0.5 shrink-0" />
+                  <p className="text-xs text-red-300">{job.error}</p>
+                </div>
+              )}
+
+              {/* Reset button */}
+              {(isDone || isError) && (
+                <button
+                  onClick={() => { setJobId(null); setJob(null); setError(null); setExpanded(null); }}
+                  className="text-xs text-violet-400 hover:text-violet-300 underline"
+                >
+                  ← Start new
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* ── Clip Result Cards ──────────────────────────────────────── */}
+          {job && job.clips.length > 0 && (
+            <div className="space-y-3">
+              {job.status === "done" && (
+                <div className="flex items-center gap-2 px-1">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span className="text-sm font-semibold text-white">
+                    {job.doneClips} clip{job.doneClips !== 1 ? "s" : ""} ready to download
+                  </span>
+                  <span className="text-xs text-white/30">· {aspectRatio} · {captionStyle}</span>
+                </div>
+              )}
+
+              {job.clips.map(clip => (
+                <div
+                  key={clip.id}
+                  className={cn(
+                    "rounded-2xl border transition-all",
+                    clip.status === "done"      ? "bg-[#18181f] border-emerald-500/20" :
+                    clip.status === "processing" ? "bg-[#18181f] border-violet-500/30" :
+                    clip.status === "error"      ? "bg-[#18181f] border-red-500/20" :
+                                                   "bg-[#18181f] border-white/6"
+                  )}
+                >
+                  {/* Clip header */}
+                  <div
+                    className="flex items-center gap-4 p-4 cursor-pointer"
+                    onClick={() => setExpanded(expanded === clip.id ? null : clip.id)}
+                  >
+                    {/* Status indicator */}
+                    <div className={cn(
+                      "w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0",
+                      clip.status === "done"       ? "bg-emerald-500/15" :
+                      clip.status === "processing" ? "bg-violet-500/15" :
+                      clip.status === "error"      ? "bg-red-500/15" :
+                                                     "bg-white/5"
+                    )}>
+                      {clip.status === "done"       ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> :
+                       clip.status === "processing" ? <Loader2 className="w-4 h-4 text-violet-400 animate-spin" /> :
+                       clip.status === "error"      ? <AlertCircle className="w-4 h-4 text-red-400" /> :
+                                                      <Clock className="w-4 h-4 text-white/20" />}
+                    </div>
+
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-white/90 truncate">{clip.title}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-xs font-mono text-violet-400">{clip.startTime} → {clip.endTime}</span>
+                        <span className="text-[10px] text-white/30">({clip.duration})</span>
+                        {clip.hookType && (
+                          <span className={cn("text-[10px] px-1.5 py-0.5 rounded border font-semibold",
+                            HOOK_COLORS[clip.hookType] ?? "bg-white/5 text-white/30 border-white/10"
                           )}>
                             {clip.hookType}
                           </span>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <span className={cn(
-                            "font-bold text-sm",
-                            clip.viralScore >= 9 ? "text-emerald-600" :
-                            clip.viralScore >= 7 ? "text-amber-600" : "text-gray-400"
-                          )}>
-                            {clip.viralScore}/10
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          {(() => {
-                            const cs = CAPTION_STYLES.find(s => s.val === (clip.captionStyle ?? captionStyle));
-                            return cs ? (
-                              <span className={cn("text-[10px] px-2 py-0.5 rounded border font-semibold", cs.color)}>
-                                {cs.label}
-                              </span>
-                            ) : null;
-                          })()}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-1">
-                            <Button
-                              size="sm" variant="ghost"
-                              onClick={e => { e.stopPropagation(); setClipDialog(clip); setClipToken(null); }}
-                              className="h-6 text-xs px-2 text-violet-600 hover:text-violet-700 hover:bg-violet-50"
-                            >
-                              <Scissors className="w-3 h-3 mr-1" />Clip
-                            </Button>
-                            {expanded === clip.id
-                              ? <ChevronUp className="w-3.5 h-3.5 text-gray-400" />
-                              : <ChevronDown className="w-3.5 h-3.5 text-gray-400" />}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Expanded Clip Detail */}
-              {expanded !== null && (() => {
-                const clip = clips.find(c => c.id === expanded);
-                if (!clip) return null;
-                return (
-                  <div className="bg-white rounded-xl border border-violet-100 shadow-sm p-6 space-y-5">
-                    {/* Score row */}
-                    <div className="flex items-center gap-6 p-4 bg-gray-50 rounded-lg">
-                      <ScorePill label="Hook"      value={clip.hookStrength} />
-                      <ScorePill label="Retention" value={clip.retentionScore} />
-                      <ScorePill label="Shareable" value={clip.shareability} />
-                      <ScorePill label="Comments"  value={clip.commentPotential} />
-                      <div className="ml-auto text-right">
-                        <div className={cn("text-2xl font-black", clip.viralScore >= 9 ? "text-emerald-500" : "text-amber-500")}>
-                          {clip.viralScore}/10
-                        </div>
-                        <div className="text-xs text-gray-400">Viral Score</div>
+                        )}
                       </div>
                     </div>
 
-                    {/* Caption style badge */}
-                    <div className="flex items-center gap-2">
-                      {(() => {
-                        const cs = CAPTION_STYLES.find(s => s.val === (clip.captionStyle ?? captionStyle));
-                        return cs ? (
-                          <span className={cn("text-xs px-3 py-1 rounded-lg border font-semibold", cs.color)}>
-                            Caption: {cs.label}
-                          </span>
-                        ) : null;
-                      })()}
-                      <span className="text-xs text-gray-400 px-3 py-1 rounded-lg border border-gray-200 bg-gray-50">
-                        {aspectRatio} · {clip.platform}
+                    {/* Viral score */}
+                    <div className="text-center mr-2">
+                      <div className={cn("text-lg font-black",
+                        clip.viralScore >= 9 ? "text-emerald-400" :
+                        clip.viralScore >= 7 ? "text-amber-400" : "text-white/40"
+                      )}>
+                        {clip.viralScore}/10
+                      </div>
+                      <div className="text-[9px] text-white/25">viral</div>
+                    </div>
+
+                    {/* Download or status */}
+                    {clip.status === "done" && clip.downloadToken ? (
+                      <a
+                        href={`/api/clipper/download/${clip.downloadToken}`}
+                        download={`clip-${clip.id}.mp4`}
+                        onClick={e => e.stopPropagation()}
+                        className="flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold px-3 py-2 rounded-lg transition-colors"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        {clip.sizeMb ? `${clip.sizeMb}MB` : "Download"}
+                      </a>
+                    ) : (
+                      <span className={cn("text-xs px-3 py-1.5 rounded-lg font-medium",
+                        clip.status === "processing" ? "bg-violet-500/15 text-violet-400" :
+                        clip.status === "error"      ? "bg-red-500/15 text-red-400" :
+                                                       "bg-white/5 text-white/25"
+                      )}>
+                        {clip.status === "processing" ? "Processing…" :
+                         clip.status === "error"      ? "Failed" : "Queued"}
                       </span>
-                    </div>
-
-                    {/* Hook */}
-                    <div>
-                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Opening Hook</p>
-                      <div className="flex items-start gap-2">
-                        <p className="flex-1 text-base font-bold text-gray-900 bg-amber-50 border border-amber-100 rounded-lg px-4 py-2.5">
-                          "{clip.hook}"
-                        </p>
-                        <button
-                          onClick={() => copyText(clip.hook, `hook-${clip.id}`)}
-                          className="mt-2 p-1.5 rounded hover:bg-gray-100"
-                        >
-                          {copiedId === `hook-${clip.id}` ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5 text-gray-400" />}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Why it works + Punchline */}
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5 flex items-center gap-1">
-                          <Eye className="w-3 h-3" /> Why it works
-                        </p>
-                        <p className="text-sm text-gray-600 leading-relaxed">{clip.whyItWorks}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Punchline / Reveal</p>
-                        <p className="text-sm text-gray-600 leading-relaxed">{clip.punchline}</p>
-                      </div>
-                    </div>
-
-                    {/* Title Ideas */}
-                    <div>
-                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 flex items-center gap-1">
-                        <TrendingUp className="w-3 h-3" /> Title Ideas
-                      </p>
-                      <div className="space-y-1.5">
-                        {clip.titleIdeas?.slice(0, 5).map((t, i) => (
-                          <div key={i} className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-gray-50 border border-gray-100">
-                            <span className="text-sm text-gray-700 flex-1">{t}</span>
-                            <button onClick={() => copyText(t, `title-${clip.id}-${i}`)} className="p-1 rounded hover:bg-gray-200">
-                              {copiedId === `title-${clip.id}-${i}` ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3 text-gray-400" />}
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* CTAs */}
-                    <div>
-                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 flex items-center gap-1">
-                        <MessageSquare className="w-3 h-3" /> CTA Options
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {clip.ctaOptions?.map((cta, i) => (
-                          <button
-                            key={i}
-                            onClick={() => copyText(cta, `cta-${clip.id}-${i}`)}
-                            className="text-xs px-3 py-1.5 rounded-full border border-gray-200 bg-gray-50 hover:bg-gray-100 text-gray-700 transition-colors"
-                          >
-                            {copiedId === `cta-${clip.id}-${i}` ? "✓ Copied" : cta}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Hashtags */}
-                    <div>
-                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 flex items-center gap-1">
-                        <Share2 className="w-3 h-3" /> Hashtags
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {clip.hashtags?.map((tag, i) => (
-                          <span key={i} className="text-xs px-2 py-1 rounded-full bg-violet-50 text-violet-700 border border-violet-100">
-                            {tag}
-                          </span>
-                        ))}
-                        <button
-                          onClick={() => copyText(clip.hashtags?.join(" ") ?? "", `htag-${clip.id}`)}
-                          className="text-xs px-2 py-1 rounded-full bg-gray-50 text-gray-500 border border-gray-200 hover:bg-gray-100"
-                        >
-                          {copiedId === `htag-${clip.id}` ? "✓ Copied" : "Copy all"}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Editor Notes */}
-                    {clip.editorNotes && (
-                      <div className="bg-amber-50 border border-amber-100 rounded-lg p-4">
-                        <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-1.5">Editor Notes</p>
-                        <p className="text-sm text-amber-900 leading-relaxed">{clip.editorNotes}</p>
-                      </div>
                     )}
 
-                    <div className="flex justify-end pt-2 border-t border-gray-100">
-                      <Button
-                        onClick={() => { setClipDialog(clip); setClipToken(null); }}
-                        className="bg-violet-500 hover:bg-violet-600 text-white text-sm h-9 px-6"
-                      >
-                        <Scissors className="w-3.5 h-3.5 mr-1.5" />
-                        Extract This Clip (Face-Centered)
-                      </Button>
+                    {/* Expand toggle */}
+                    <div className="text-white/20">
+                      {expanded === clip.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                     </div>
                   </div>
-                );
-              })()}
+
+                  {/* Expanded detail */}
+                  {expanded === clip.id && (
+                    <div className="border-t border-white/5 px-4 pb-4 pt-3 space-y-3">
+                      {clip.hook && (
+                        <div className="flex items-start gap-2 bg-amber-500/8 border border-amber-500/15 rounded-xl px-4 py-3">
+                          <div className="flex-1">
+                            <p className="text-[10px] font-bold text-amber-400/70 uppercase tracking-wide mb-0.5">Opening Hook</p>
+                            <p className="text-sm font-semibold text-white/90">"{clip.hook}"</p>
+                          </div>
+                          <button onClick={() => copyText(clip.hook, `hook-${clip.id}`)}
+                            className="p-1.5 rounded-lg hover:bg-white/8 text-white/30 hover:text-white/60 transition-colors">
+                            {copied === `hook-${clip.id}` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                      )}
+
+                      {clip.error && (
+                        <div className="text-xs text-red-300 bg-red-500/8 border border-red-500/15 rounded-lg px-3 py-2">
+                          Error: {clip.error}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           )}
+
         </div>
       </div>
-
-      {/* Clip Download Dialog */}
-      {clipDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setClipDialog(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center gap-2">
-              <Scissors className="w-5 h-5 text-violet-500" />
-              <h3 className="font-semibold text-gray-900">Extract Clip #{clipDialog.id}</h3>
-            </div>
-
-            <div className="bg-violet-50 rounded-lg p-3 text-sm">
-              <p className="text-violet-800 font-medium">{clipDialog.topic}</p>
-              <p className="text-violet-600 text-xs mt-0.5 font-mono">{clipDialog.startTime} → {clipDialog.endTime} ({clipDialog.duration})</p>
-            </div>
-
-            <div>
-              <label className="text-xs font-medium text-gray-600 block mb-1.5">Direct Video URL (MP4/WebM)</label>
-              <Input value={clipVideoUrl} onChange={e => setClipVidUrl(e.target.value)}
-                placeholder="https://example.com/video.mp4" className="text-sm h-9" />
-              <p className="text-xs text-gray-400 mt-1">Paste a direct MP4 link. Face detection &amp; crop applied automatically.</p>
-            </div>
-
-            <div>
-              <label className="text-xs font-medium text-gray-600 block mb-1.5">Output Aspect Ratio</label>
-              <div className="flex gap-2">
-                {ASPECT_RATIOS.map(ar => (
-                  <button key={ar.val} onClick={() => setClipAR(ar.val)}
-                    className={cn("flex-1 text-xs py-2 rounded-lg border font-medium transition-colors",
-                      clipAR === ar.val ? "bg-violet-500 border-violet-500 text-white" : "border-gray-200 text-gray-600 hover:border-violet-300")}>
-                    {ar.label} {ar.sub}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {clipToken && (
-              <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-center gap-3">
-                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                <div className="flex-1">
-                  <p className="text-sm text-emerald-800 font-medium">Clip ready!</p>
-                  <p className="text-xs text-emerald-600">Face-centered &amp; cropped to {clipAR}.</p>
-                </div>
-                <a href={`/api/clipper/download/${clipToken}`} download="clip.mp4"
-                  className="flex items-center gap-1.5 bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-emerald-600">
-                  <Download className="w-3 h-3" /> Download
-                </a>
-              </div>
-            )}
-
-            <div className="flex gap-3 pt-1">
-              <Button variant="outline" onClick={() => setClipDialog(null)} className="flex-1 h-9 text-sm">Cancel</Button>
-              <Button onClick={extractClip} disabled={clipping || !clipVideoUrl.trim()}
-                className="flex-1 h-9 text-sm bg-violet-500 hover:bg-violet-600 text-white">
-                {clipping
-                  ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Processing…</>
-                  : <><Scissors className="w-3.5 h-3.5 mr-1.5" />Extract Clip</>}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
     </AppLayout>
   );
 }

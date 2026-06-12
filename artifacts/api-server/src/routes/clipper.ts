@@ -1,275 +1,381 @@
 /**
- * Clipper Tool — YouTube Transcript → AI Viral Analysis → Face-Centered Clip Extraction
+ * Clipper — Full pipeline: YouTube → yt-dlp download → AI analysis → FFmpeg clip + captions
  *
- * Routes:
- *   POST /api/clipper/transcript  — fetch transcript via NoteGPT API
- *   POST /api/clipper/analyze     — AI viral clip analysis (Groq via OpenRouter)
- *   POST /api/clipper/clip        — face-centered clip extraction (Python + OpenCV)
- *   GET  /api/clipper/clip/:token — download a generated clip
+ * POST /api/clipper/process          — start full pipeline, returns { jobId }
+ * GET  /api/clipper/status/:jobId    — poll job progress + clip results
+ * GET  /api/clipper/download/:token  — download a generated clip
  */
 
 import { Router, type IRouter } from "express";
 import * as fs from "fs";
 import * as path from "path";
-import { execFile } from "child_process";
+import { execFile, spawn } from "child_process";
 import { promisify } from "util";
 import * as crypto from "crypto";
 
 const execFileAsync = promisify(execFile);
 const router: IRouter = Router();
-
 const PYTHON = process.env.PYTHON_PATH ?? "python3";
-const FACE_CLIP_SCRIPT = path.resolve("scripts/face_clip.py");
+const CREATE_CLIP_SCRIPT = path.resolve("../../scripts/create_clip.py");
 
-// In-memory store for clip download tokens (cleared after 10 min)
-const clipTokens = new Map<string, { filePath: string; expiresAt: number }>();
+// ── Types ─────────────────────────────────────────────────────────────────────
+interface ClipResult {
+  id: number;
+  title: string;
+  hook: string;
+  hookType: string;
+  viralScore: number;
+  startTime: string;
+  endTime: string;
+  duration: string;
+  status: "pending" | "processing" | "done" | "error";
+  downloadToken?: string;
+  sizeMb?: number;
+  error?: string;
+}
+
+interface ClipJob {
+  id: string;
+  status: "queued" | "downloading" | "transcribing" | "analyzing" | "creating" | "done" | "error";
+  stepLabel: string;
+  progress: number;
+  clips: ClipResult[];
+  totalClips: number;
+  doneClips: number;
+  videoTitle?: string;
+  error?: string;
+  createdAt: number;
+  dir: string;
+}
+
+// ── In-memory stores ───────────────────────────────────────────────────────────
+const jobs = new Map<string, ClipJob>();
+const downloadTokens = new Map<string, { filePath: string; expiresAt: number }>();
+
+// Expire old jobs + tokens every minute
 setInterval(() => {
   const now = Date.now();
-  for (const [token, entry] of clipTokens.entries()) {
+  for (const [id, job] of jobs.entries()) {
+    if (now - job.createdAt > 60 * 60_000) { // 1 hour
+      fs.promises.rm(job.dir, { recursive: true, force: true }).catch(() => {});
+      jobs.delete(id);
+    }
+  }
+  for (const [token, entry] of downloadTokens.entries()) {
     if (entry.expiresAt < now) {
-      fs.promises.rm(path.dirname(entry.filePath), { recursive: true, force: true }).catch(() => {});
-      clipTokens.delete(token);
+      downloadTokens.delete(token);
     }
   }
 }, 60_000);
 
-// ---------------------------------------------------------------------------
-// Transcript: NoteGPT proxy
-// ---------------------------------------------------------------------------
-router.post("/clipper/transcript", async (req, res): Promise<void> => {
-  const { url } = req.body ?? {};
-  if (!url) { res.status(400).json({ error: "url required" }); return; }
-
-  const videoId = extractYouTubeId(String(url));
-  if (!videoId) { res.status(400).json({ error: "Invalid YouTube URL or video ID" }); return; }
-
-  try {
-    // Step 1 — Get session cookie from NoteGPT
-    const userinfoRes = await fetch("https://notegpt.io/user/v2/userinfo", {
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-    });
-    const setCookie = userinfoRes.headers.get("set-cookie") ?? "";
-    const sboxGuid  = setCookie.match(/sbox-guid=([^;,]+)/)?.[1] ?? "";
-    const anonId    = crypto.randomUUID();
-
-    // Step 2 — Fetch transcript
-    const transcriptRes = await fetch(
-      `https://notegpt.io/api/v2/video-transcript?platform=youtube&video_id=${videoId}`,
-      {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-          Cookie: `sbox-guid=${sboxGuid}; anonymous_user_id=${anonId}`,
-        },
-      },
-    );
-
-    const data = await transcriptRes.json() as any;
-    if (data.code !== 100000) {
-      res.status(400).json({ error: data.message ?? "Transcript not available for this video" });
-      return;
-    }
-
-    res.json(data.data);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message ?? "Failed to fetch transcript" });
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function extractYouTubeId(url: string): string | null {
+  const raw = url.trim();
+  if (/^[a-zA-Z0-9_-]{11}$/.test(raw)) return raw;
+  for (const p of [
+    /[?&]v=([a-zA-Z0-9_-]{11})/,
+    /youtu\.be\/([a-zA-Z0-9_-]{11})/,
+    /embed\/([a-zA-Z0-9_-]{11})/,
+    /shorts\/([a-zA-Z0-9_-]{11})/,
+  ]) {
+    const m = raw.match(p);
+    if (m) return m[1];
   }
-});
+  return null;
+}
 
-// ---------------------------------------------------------------------------
-// Analyze: AI viral clip detection using Groq (via OpenRouter)
-// ---------------------------------------------------------------------------
-router.post("/clipper/analyze", async (req, res): Promise<void> => {
-  const {
-    transcripts,
-    videoInfo,
-    language     = "en",
-    numClips     = 10,
-    minDuration  = 30,
-    captionStyle = "Bold Yellow",
-    hookFilter   = null,
-  } = req.body ?? {};
-  if (!transcripts) { res.status(400).json({ error: "transcripts required" }); return; }
+function timeStrToSeconds(t: string): number {
+  const parts = t.trim().split(":").map(Number);
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return parts[0];
+}
+
+function formatDuration(secs: number): string {
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+               : `${m}:${String(s).padStart(2, "0")}`;
+}
+
+// ── Download YouTube video via yt-dlp ─────────────────────────────────────────
+async function downloadVideo(videoId: string, outDir: string, job: ClipJob): Promise<string> {
+  job.status = "downloading";
+  job.stepLabel = "Downloading YouTube video…";
+  job.progress = 5;
+
+  const url = `https://www.youtube.com/watch?v=${videoId}`;
+  const outputTemplate = path.join(outDir, "source.%(ext)s");
+
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn("yt-dlp", [
+      "-f", "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[ext=mp4]",
+      "--merge-output-format", "mp4",
+      "--no-playlist",
+      "--no-warnings",
+      "-o", outputTemplate,
+      url,
+    ]);
+
+    proc.stdout.on("data", (d: Buffer) => {
+      const line = d.toString();
+      const match = line.match(/(\d+(?:\.\d+)?)%/);
+      if (match) {
+        job.progress = Math.min(30, 5 + Math.round(parseFloat(match[1]) * 0.25));
+        job.stepLabel = `Downloading… ${match[1]}%`;
+      }
+    });
+    proc.on("close", code => code === 0 ? resolve() : reject(new Error("yt-dlp failed (video may be unavailable or geo-restricted)")));
+    proc.on("error", reject);
+  });
+
+  // Find downloaded file
+  const files = await fs.promises.readdir(outDir);
+  const mp4 = files.find(f => f.startsWith("source") && f.endsWith(".mp4"));
+  if (!mp4) throw new Error("Downloaded file not found");
+  return path.join(outDir, mp4);
+}
+
+// ── Fetch transcript from NoteGPT ─────────────────────────────────────────────
+async function fetchTranscript(videoId: string, job: ClipJob): Promise<{ segments: any[]; title: string }> {
+  job.status = "transcribing";
+  job.stepLabel = "Fetching transcript…";
+  job.progress = 33;
+
+  const userinfoRes = await fetch("https://notegpt.io/user/v2/userinfo", {
+    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+  });
+  const setCookie = userinfoRes.headers.get("set-cookie") ?? "";
+  const sboxGuid  = setCookie.match(/sbox-guid=([^;,]+)/)?.[1] ?? "";
+  const anonId    = crypto.randomUUID();
+
+  const txRes = await fetch(
+    `https://notegpt.io/api/v2/video-transcript?platform=youtube&video_id=${videoId}`,
+    { headers: { "User-Agent": "Mozilla/5.0", Cookie: `sbox-guid=${sboxGuid}; anonymous_user_id=${anonId}` } },
+  );
+  const data = await txRes.json() as any;
+  if (data.code !== 100000) throw new Error(data.message ?? "Transcript not available");
+
+  const tx = data.data;
+  const segs: any[] = tx.transcripts?.en?.custom ?? tx.transcripts?.[Object.keys(tx.transcripts ?? {})[0]]?.custom ?? [];
+  return { segments: segs, title: tx.videoInfo?.name ?? "Video" };
+}
+
+// ── AI analysis via OpenRouter ─────────────────────────────────────────────────
+async function analyzeWithAI(
+  segments: any[], videoTitle: string, numClips: number, minDuration: number,
+  captionStyle: string, hookFilter: string | null, aspectRatio: string, job: ClipJob,
+): Promise<any[]> {
+  job.status = "analyzing";
+  job.stepLabel = "AI analyzing for viral clips…";
+  job.progress = 40;
 
   const apiKey = process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY;
   const apiUrl = (process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL ?? "https://openrouter.ai/api").replace(/\/$/, "");
+  if (!apiKey) throw new Error("AI integration not configured");
 
-  if (!apiKey) {
-    res.status(402).json({ error: "AI integration not configured. Contact support." });
-    return;
-  }
-
-  // Format the transcript (pick the selected language)
-  const segments: Array<{ start: string; end: string; text: string }> =
-    transcripts[language]?.custom ?? transcripts["en"]?.custom ?? [];
-
-  if (!segments.length) {
-    res.status(400).json({ error: "No transcript segments found for language: " + language });
-    return;
-  }
-
-  const title    = videoInfo?.name ?? "Unknown Video";
-  const author   = videoInfo?.author ?? "";
-  const duration = videoInfo?.duration ? formatDuration(parseInt(videoInfo.duration)) : "";
-  const transcriptText = segments
-    .map(s => `[${s.start}] ${s.text}`)
-    .join("\n")
-    .slice(0, 12000);
-
+  const trimmed = segments.slice(0, 150);
+  const transcriptText = trimmed.map((s: any) => `[${s.start}] ${s.text}`).join("\n").slice(0, 12000);
   const hookConstraint = hookFilter
-    ? `IMPORTANT: You MUST only suggest clips with hookType = "${hookFilter}".`
+    ? `IMPORTANT: Only suggest clips with hookType = "${hookFilter}".`
     : `hookType options: Curiosity, Shock, Debate, Story, Emotional, Educational, Contrarian, Inspirational, Controversial, Fear, Warning`;
 
-  const systemPrompt = `You are an elite YouTube Shorts, TikTok, and Instagram Reels viral content expert. You analyze transcripts and identify the most viral-worthy clip segments. You ONLY output valid JSON arrays — no markdown, no explanation, no preamble.`;
+  const res = await fetch(`${apiUrl}/chat/completions`, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "qwen/qwen3.6-flash",
+      max_tokens: 8192,
+      temperature: 0.7,
+      messages: [
+        { role: "system", content: "You are a viral short-form video expert. Output ONLY valid JSON arrays, no markdown." },
+        { role: "user", content: `Find the ${numClips} best viral clips from this video.
 
-  const userPrompt = `Analyze this transcript and find the BEST viral short-form clip opportunities.
-
-Video: "${title}" by ${author}
-Duration: ${duration}
-
-SETTINGS:
-- Find exactly ${numClips} clips (scoring 7+ viral potential)
-- Each clip must be at least ${minDuration} seconds long
-- Caption style for all clips: "${captionStyle}"
-- ${hookConstraint}
+Video: "${videoTitle}"
+Settings: ${numClips} clips, min ${minDuration}s each, aspect ${aspectRatio}, captions: ${captionStyle}
+${hookConstraint}
 
 TRANSCRIPT:
 ${transcriptText}
 
----
+Return ONLY a JSON array:
+[{"id":1,"startTime":"00:01:23","endTime":"00:02:45","duration":"82s","topic":"one sentence","hookType":"Curiosity","viralScore":9,"platform":"TikTok, YouTube Shorts","hook":"hook under 12 words","punchline":"key reveal","titleIdeas":["T1","T2","T3"],"hashtags":["#tag1","#tag2"],"captionStyle":"${captionStyle}"}]` },
+      ],
+    }),
+  });
 
-Output ONLY a valid JSON array with exactly ${numClips} objects (or fewer if the video is too short):
+  if (!res.ok) throw new Error(`AI API error ${res.status}: ${await res.text()}`);
+  const aiData = await res.json() as any;
+  const raw = aiData.choices?.[0]?.message?.content ?? "[]";
+  const match = raw.match(/\[[\s\S]*\]/);
+  if (!match) throw new Error("No JSON from AI");
+  job.progress = 50;
+  return JSON.parse(match[0]);
+}
 
-[
-  {
-    "id": 1,
-    "startTime": "00:01:23",
-    "endTime": "00:02:45",
-    "duration": "82s",
-    "topic": "Core topic in one sentence",
-    "hookType": "Curiosity",
-    "viralScore": 9,
-    "platform": "TikTok, YouTube Shorts",
-    "hook": "Best hook under 12 words",
-    "punchline": "The key reveal or emotional peak",
-    "whyItWorks": "Why viewers will stop scrolling and stay",
-    "captionStyle": "${captionStyle}",
-    "ctaOptions": ["CTA 1", "CTA 2", "CTA 3"],
-    "titleIdeas": ["Title 1", "Title 2", "Title 3", "Title 4", "Title 5"],
-    "hashtags": ["#tag1", "#tag2", "#tag3", "#tag4", "#tag5"],
-    "editorNotes": "Specific editing tips for ${captionStyle} captions + face-centered ${req.body?.aspectRatio ?? "9:16"} crop",
-    "hookStrength": 8,
-    "retentionScore": 7,
-    "shareability": 9,
-    "commentPotential": 8
-  }
-]
+// ── Create a single clip via Python ──────────────────────────────────────────
+async function createClip(
+  clip: any, videoPath: string, segments: any[], aspectRatio: string,
+  captionStyle: string, outDir: string,
+): Promise<{ downloadToken: string; sizeMb: number }> {
+  const startSec = timeStrToSeconds(clip.startTime);
+  const endSec   = timeStrToSeconds(clip.endTime);
 
-Return ONLY the JSON array. No markdown. No explanation.`;
+  // Build relative captions from transcript
+  const clipCaptions = segments
+    .filter((s: any) => {
+      const t = timeStrToSeconds(s.start);
+      return t >= startSec && t < endSec;
+    })
+    .map((s: any) => ({
+      start: timeStrToSeconds(s.start) - startSec,
+      end:   Math.min(timeStrToSeconds(s.start) - startSec + 4, endSec - startSec),
+      text:  s.text,
+    }));
 
-  const MODEL = "qwen/qwen3.6-flash";
-  // Replit AI Integrations proxy: base URL already includes path, append /chat/completions
-  const completionsUrl = `${apiUrl}/chat/completions`;
+  const clipDir  = path.join(outDir, `clip-${clip.id}`);
+  const outPath  = path.join(clipDir, "clip.mp4");
+  await fs.promises.mkdir(clipDir, { recursive: true });
+
+  const input = JSON.stringify({
+    input_video:   videoPath,
+    output_path:   outPath,
+    start_time:    clip.startTime,
+    end_time:      clip.endTime,
+    aspect_ratio:  aspectRatio,
+    caption_style: captionStyle,
+    hook:          clip.hook ?? clip.topic ?? "",
+    captions:      clipCaptions,
+  });
+
+  const { stdout } = await execFileAsync(PYTHON, [CREATE_CLIP_SCRIPT, input], { timeout: 600_000 });
+  const result = JSON.parse(stdout.trim());
+  if (!result.ok) throw new Error(result.error ?? "Clip creation failed");
+
+  const token = crypto.randomUUID();
+  downloadTokens.set(token, { filePath: outPath, expiresAt: Date.now() + 2 * 60 * 60_000 }); // 2hr
+  return { downloadToken: token, sizeMb: result.size_mb };
+}
+
+// ── Full pipeline ─────────────────────────────────────────────────────────────
+async function runPipeline(job: ClipJob, opts: {
+  videoId: string; numClips: number; aspectRatio: string;
+  captionStyle: string; hookFilter: string | null; minDuration: number;
+}) {
+  const { videoId, numClips, aspectRatio, captionStyle, hookFilter, minDuration } = opts;
 
   try {
-    const aiRes = await fetch(completionsUrl, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://ai-video-factory.replit.app",
-        "X-Title": "AI Video Factory OS",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 8192,
-        temperature: 0.7,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-      }),
-    });
+    // 1. Download
+    const videoPath = await downloadVideo(videoId, job.dir, job);
 
-    if (!aiRes.ok) {
-      const errText = await aiRes.text();
-      throw new Error(`AI API ${aiRes.status}: ${errText}`);
+    // 2. Transcript (allow failure — will still create clips without captions)
+    let segments: any[] = [];
+    try {
+      const tx = await fetchTranscript(videoId, job);
+      segments = tx.segments;
+      job.videoTitle = tx.title;
+    } catch {
+      job.stepLabel = "Transcript unavailable — creating clips without captions…";
     }
 
-    const aiData = await aiRes.json() as any;
-    const raw    = aiData.choices?.[0]?.message?.content ?? "[]";
+    // 3. AI analysis
+    const aiClips = await analyzeWithAI(segments, job.videoTitle ?? "Video", numClips, minDuration, captionStyle, hookFilter, aspectRatio, job);
 
-    // Parse JSON — be lenient with surrounding text/markdown fences
-    const jsonMatch = raw.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) throw new Error("No JSON array found in AI response");
-    const clips = JSON.parse(jsonMatch[0]);
+    // 4. Initialize clip results
+    job.totalClips = aiClips.length;
+    job.clips = aiClips.map((c: any) => ({
+      id: c.id, title: c.topic ?? `Clip ${c.id}`, hook: c.hook ?? "",
+      hookType: c.hookType ?? "Curiosity", viralScore: c.viralScore ?? 7,
+      startTime: c.startTime, endTime: c.endTime, duration: c.duration ?? "",
+      status: "pending",
+    }));
+    job.status = "creating";
 
-    res.json({ clips, transcriptSegments: segments.length, model: MODEL });
+    // 5. Create clips one by one
+    for (let i = 0; i < aiClips.length; i++) {
+      const aiClip = aiClips[i];
+      const jobClip = job.clips[i];
+      if (!jobClip) continue;
+
+      jobClip.status = "processing";
+      job.stepLabel = `Creating clip ${i + 1} of ${aiClips.length}…`;
+      job.progress = 50 + Math.round((i / aiClips.length) * 45);
+
+      try {
+        const { downloadToken, sizeMb } = await createClip(aiClip, videoPath, segments, aspectRatio, captionStyle, job.dir);
+        jobClip.status = "done";
+        jobClip.downloadToken = downloadToken;
+        jobClip.sizeMb = sizeMb;
+        job.doneClips++;
+      } catch (err: any) {
+        jobClip.status = "error";
+        jobClip.error = err.message?.slice(0, 200);
+      }
+    }
+
+    job.status = "done";
+    job.progress = 100;
+    job.stepLabel = `Done — ${job.doneClips} clip${job.doneClips !== 1 ? "s" : ""} ready`;
   } catch (err: any) {
-    res.status(500).json({ error: err.message ?? "AI analysis failed" });
+    job.status = "error";
+    job.error = err.message ?? "Pipeline failed";
+    job.stepLabel = job.error ?? "Pipeline failed";
   }
-});
+}
 
-// ---------------------------------------------------------------------------
-// Clip: face-centered extraction from a video URL
-// ---------------------------------------------------------------------------
-router.post("/clipper/clip", async (req, res): Promise<void> => {
-  const { videoUrl, startTime, endTime, aspectRatio = "9:16", clipId = 1 } = req.body ?? {};
-  if (!videoUrl || !startTime || !endTime) {
-    res.status(400).json({ error: "videoUrl, startTime, endTime required" });
-    return;
-  }
+// ── Routes ─────────────────────────────────────────────────────────────────────
 
-  const dir = `/tmp/clipper-${Date.now()}-${clipId}`;
+// POST /api/clipper/process
+router.post("/clipper/process", async (req, res): Promise<void> => {
+  const {
+    url, numClips = 5, aspectRatio = "9:16",
+    captionStyle = "Bold Yellow", hookFilter = null, minDuration = 30,
+  } = req.body ?? {};
+
+  if (!url) { res.status(400).json({ error: "url required" }); return; }
+  const videoId = extractYouTubeId(String(url));
+  if (!videoId) { res.status(400).json({ error: "Invalid YouTube URL" }); return; }
+
+  const jobId = crypto.randomUUID();
+  const dir   = `/tmp/clipper-job-${jobId}`;
   await fs.promises.mkdir(dir, { recursive: true });
 
-  try {
-    // Download source video
-    const inputPath = path.join(dir, "source.mp4");
-    const videoRes  = await fetch(String(videoUrl), {
-      headers: { "User-Agent": "Mozilla/5.0" },
-    });
-    if (!videoRes.ok) {
-      res.status(400).json({ error: `Video download failed: ${videoRes.status}` });
-      return;
-    }
-    const buf = await videoRes.arrayBuffer();
-    await fs.promises.writeFile(inputPath, Buffer.from(buf));
+  const job: ClipJob = {
+    id: jobId, status: "queued", stepLabel: "Starting…", progress: 0,
+    clips: [], totalClips: 0, doneClips: 0, createdAt: Date.now(), dir,
+  };
+  jobs.set(jobId, job);
 
-    // Run Python face detection + clip
-    const outputPath = path.join(dir, `clip-${clipId}.mp4`);
-    const { stdout } = await execFileAsync(PYTHON, [
-      FACE_CLIP_SCRIPT,
-      inputPath,
-      String(startTime),
-      String(endTime),
-      outputPath,
-      String(aspectRatio),
-    ], { timeout: 300_000 });
+  // Fire and forget
+  runPipeline(job, { videoId, numClips, aspectRatio, captionStyle, hookFilter, minDuration }).catch(() => {});
 
-    const result = JSON.parse(stdout.trim() || "{}");
-
-    // Create download token (valid for 10 minutes)
-    const token = crypto.randomUUID();
-    clipTokens.set(token, { filePath: outputPath, expiresAt: Date.now() + 10 * 60_000 });
-
-    res.json({ ...result, downloadToken: token });
-  } catch (err: any) {
-    await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
-    res.status(500).json({ error: err.message ?? "Clip extraction failed" });
-  }
+  res.json({ jobId });
 });
 
-// ---------------------------------------------------------------------------
-// Download clip by token
-// ---------------------------------------------------------------------------
-router.get("/clipper/download/:token", async (req, res): Promise<void> => {
-  const { token } = req.params;
-  const entry = clipTokens.get(token);
-  if (!entry || entry.expiresAt < Date.now()) {
-    res.status(404).json({ error: "Download link expired or not found" });
-    return;
-  }
+// GET /api/clipper/status/:jobId
+router.get("/clipper/status/:jobId", (req, res): void => {
+  const job = jobs.get(req.params.jobId);
+  if (!job) { res.status(404).json({ error: "Job not found" }); return; }
+  res.json({
+    id: job.id, status: job.status, stepLabel: job.stepLabel,
+    progress: job.progress, totalClips: job.totalClips, doneClips: job.doneClips,
+    videoTitle: job.videoTitle, error: job.error,
+    clips: job.clips.map(c => ({
+      id: c.id, title: c.title, hook: c.hook, hookType: c.hookType,
+      viralScore: c.viralScore, startTime: c.startTime, endTime: c.endTime,
+      duration: c.duration, status: c.status, downloadToken: c.downloadToken,
+      sizeMb: c.sizeMb, error: c.error,
+    })),
+  });
+});
 
+// GET /api/clipper/download/:token
+router.get("/clipper/download/:token", async (req, res): Promise<void> => {
+  const entry = downloadTokens.get(req.params.token);
+  if (!entry || entry.expiresAt < Date.now()) {
+    res.status(404).json({ error: "Download link expired or not found" }); return;
+  }
   try {
     const stat = await fs.promises.stat(entry.filePath);
     res.setHeader("Content-Type", "video/mp4");
@@ -280,35 +386,5 @@ router.get("/clipper/download/:token", async (req, res): Promise<void> => {
     res.status(500).json({ error: "File not found" });
   }
 });
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-function extractYouTubeId(url: string): string | null {
-  const raw = url.trim();
-  // Raw 11-char video ID
-  if (/^[a-zA-Z0-9_-]{11}$/.test(raw)) return raw;
-
-  const patterns = [
-    /[?&]v=([a-zA-Z0-9_-]{11})/,
-    /youtu\.be\/([a-zA-Z0-9_-]{11})/,
-    /embed\/([a-zA-Z0-9_-]{11})/,
-    /\/v\/([a-zA-Z0-9_-]{11})/,
-    /shorts\/([a-zA-Z0-9_-]{11})/,
-  ];
-  for (const p of patterns) {
-    const m = raw.match(p);
-    if (m) return m[1];
-  }
-  return null;
-}
-
-function formatDuration(secs: number): string {
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  const s = secs % 60;
-  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
-               : `${m}:${String(s).padStart(2, "0")}`;
-}
 
 export default router;
