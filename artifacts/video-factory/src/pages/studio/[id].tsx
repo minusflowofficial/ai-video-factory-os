@@ -131,6 +131,13 @@ export default function StudioEditor() {
   // Music+visuals only — no text overlays. Skips script generation step.
   const isSatisfyingMode = !renderOpts.showTitle && !renderOpts.showCaptions;
 
+  // Derive used music track from project.voiceoverUrl (e.g. "…/music/872/872.mp3" → 872)
+  const usedMusicId    = (() => {
+    const m = (project?.voiceoverUrl ?? "").match(/\/music\/(\d+)\/\d+\.mp3/);
+    return m ? parseInt(m[1], 10) : null;
+  })();
+  const usedMusicTrack = usedMusicId ? MUSIC.find(t => t.id === usedMusicId) : null;
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const initRef  = useRef<number | null>(null);
 
@@ -660,101 +667,93 @@ export default function StudioEditor() {
               )}
 
               {/* ── Music tab ──────────────────────────────────────────── */}
-              {assetTab === "music" && (() => {
-                // Extract track ID from voiceoverUrl: "…/music/872/872.mp3" → 872
-                const voiceUrl  = project?.voiceoverUrl ?? "";
-                const urlMatch  = voiceUrl.match(/\/music\/(\d+)\/\d+\.mp3/);
-                const usedId    = urlMatch ? parseInt(urlMatch[1], 10) : null;
-                const usedTrack = usedId ? MUSIC.find(t => t.id === usedId) : null;
-
-                return (
-                  <div className="space-y-2">
-                    {/* Used track chip */}
-                    {usedId && (
-                      <div className="space-y-1">
-                        <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Used in this video</p>
-                        <div
-                          onClick={() => setSelectedTrack(usedId)}
+              {assetTab === "music" && (
+                <div className="space-y-2">
+                  {/* Used track — derived at component level from project.voiceoverUrl */}
+                  {usedMusicId && (
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Used in this video</p>
+                      <div
+                        onClick={() => setSelectedTrack(usedMusicId)}
+                        className={cn(
+                          "flex items-center gap-2 p-2 rounded-lg cursor-pointer border transition-colors",
+                          selectedTrack === usedMusicId || selectedTrack === null
+                            ? "bg-amber-50 border-amber-300"
+                            : "bg-white border-gray-100 hover:border-gray-200",
+                        )}
+                      >
+                        <button
+                          onClick={e => { e.stopPropagation(); togglePlay(usedMusicId); }}
                           className={cn(
-                            "flex items-center gap-2 p-2 rounded-lg cursor-pointer border transition-colors",
-                            selectedTrack === usedId || selectedTrack === null
-                              ? "bg-amber-50 border-amber-300"
-                              : "bg-white border-gray-100 hover:border-gray-200",
+                            "w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-colors",
+                            playingTrack === usedMusicId ? "bg-amber-400 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200",
                           )}
                         >
-                          <button
-                            onClick={e => { e.stopPropagation(); togglePlay(usedId); }}
+                          {playingTrack === usedMusicId
+                            ? <Pause className="w-2.5 h-2.5" fill="currentColor" />
+                            : <Play  className="w-2.5 h-2.5" fill="currentColor" />}
+                        </button>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-gray-800 truncate">
+                            {usedMusicTrack?.title ?? `Track #${usedMusicId}`}
+                          </p>
+                          <p className="text-[10px] text-gray-400">
+                            {usedMusicTrack ? `${usedMusicTrack.mood} · ${usedMusicTrack.dur}` : "Mixkit track"}
+                          </p>
+                        </div>
+                        {(selectedTrack === usedMusicId || selectedTrack === null) && (
+                          <CheckCircle2 className="w-3 h-3 text-amber-500 shrink-0" />
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Toggle to show full library */}
+                  <button
+                    onClick={() => setShowMusicLibrary(v => !v)}
+                    className="text-[10px] text-gray-400 hover:text-gray-600 flex items-center gap-1 transition-colors"
+                  >
+                    <Music2 className="w-3 h-3" />
+                    {showMusicLibrary ? "Hide library" : "Change music…"}
+                  </button>
+
+                  {/* Full library — collapsed by default when used track is known */}
+                  {(showMusicLibrary || !usedMusicId) && (
+                    <div className="space-y-1">
+                      {!usedMusicId && <p className="text-[10px] text-gray-400">▶ preview · click to select</p>}
+                      {MUSIC.map(track => {
+                        const playing  = playingTrack  === track.id;
+                        const selected = selectedTrack === track.id;
+                        return (
+                          <div
+                            key={track.id}
+                            onClick={() => setSelectedTrack(track.id)}
                             className={cn(
-                              "w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-colors",
-                              playingTrack === usedId ? "bg-amber-400 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200",
+                              "flex items-center gap-2 p-2 rounded-lg cursor-pointer border transition-colors",
+                              selected ? "bg-amber-50 border-amber-200" : "bg-white border-gray-100 hover:border-gray-200",
                             )}
                           >
-                            {playingTrack === usedId
-                              ? <Pause className="w-2.5 h-2.5" fill="currentColor" />
-                              : <Play  className="w-2.5 h-2.5" fill="currentColor" />}
-                          </button>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-medium text-gray-800 truncate">
-                              {usedTrack?.title ?? `Track #${usedId}`}
-                            </p>
-                            <p className="text-[10px] text-gray-400">
-                              {usedTrack ? `${usedTrack.mood} · ${usedTrack.dur}` : "Mixkit track"}
-                            </p>
-                          </div>
-                          {(selectedTrack === usedId || selectedTrack === null) && (
-                            <CheckCircle2 className="w-3 h-3 text-amber-500 shrink-0" />
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Change music toggle */}
-                    <button
-                      onClick={() => setShowMusicLibrary(v => !v)}
-                      className="text-[10px] text-gray-400 hover:text-gray-600 flex items-center gap-1 transition-colors"
-                    >
-                      <Music2 className="w-3 h-3" />
-                      {showMusicLibrary ? "Hide library" : "Change music…"}
-                    </button>
-
-                    {/* Full library (collapsed by default) */}
-                    {(showMusicLibrary || !usedId) && (
-                      <div className="space-y-1">
-                        {!usedId && <p className="text-[10px] text-gray-400">▶ preview · click to select</p>}
-                        {MUSIC.map(track => {
-                          const playing  = playingTrack  === track.id;
-                          const selected = selectedTrack === track.id;
-                          return (
-                            <div
-                              key={track.id}
-                              onClick={() => setSelectedTrack(track.id)}
+                            <button
+                              onClick={e => { e.stopPropagation(); togglePlay(track.id); }}
                               className={cn(
-                                "flex items-center gap-2 p-2 rounded-lg cursor-pointer border transition-colors",
-                                selected ? "bg-amber-50 border-amber-200" : "bg-white border-gray-100 hover:border-gray-200",
+                                "w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-colors",
+                                playing ? "bg-amber-400 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200",
                               )}
                             >
-                              <button
-                                onClick={e => { e.stopPropagation(); togglePlay(track.id); }}
-                                className={cn(
-                                  "w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-colors",
-                                  playing ? "bg-amber-400 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200",
-                                )}
-                              >
-                                {playing ? <Pause className="w-2.5 h-2.5" fill="currentColor" /> : <Play className="w-2.5 h-2.5" fill="currentColor" />}
-                              </button>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-xs font-medium text-gray-800 truncate">{track.title}</p>
-                                <p className="text-[10px] text-gray-400">{track.mood} · {track.dur}</p>
-                              </div>
-                              {selected && <CheckCircle2 className="w-3 h-3 text-amber-500 shrink-0" />}
+                              {playing ? <Pause className="w-2.5 h-2.5" fill="currentColor" /> : <Play className="w-2.5 h-2.5" fill="currentColor" />}
+                            </button>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium text-gray-800 truncate">{track.title}</p>
+                              <p className="text-[10px] text-gray-400">{track.mood} · {track.dur}</p>
                             </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
+                            {selected && <CheckCircle2 className="w-3 h-3 text-amber-500 shrink-0" />}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* ── Voice tab ──────────────────────────────────────────── */}
               {assetTab === "voice" && (
