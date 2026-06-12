@@ -17,72 +17,81 @@ import {
 const router: IRouter = Router();
 
 // ---------------------------------------------------------------------------
-// Mixkit CDN asset bank — curated IDs by category
+// Mixkit CDN — confirmed working IDs (server-side tested 200)
 // Video:  https://assets.mixkit.co/videos/{id}/{id}-360.mp4
 // Thumb:  https://assets.mixkit.co/videos/{id}/{id}-thumb-360-0.jpg
 // Music:  https://assets.mixkit.co/music/{id}/{id}.mp3
-// SFX:    https://assets.mixkit.co/active_storage/sfx/{id}/{id}-preview.mp3
+// All served via /api/proxy/media to bypass browser CORS restrictions
 // ---------------------------------------------------------------------------
+
 const MIXKIT_VIDEOS: Record<string, number[]> = {
-  technology:  [2523, 2524, 2525, 2526, 2527],
-  business:    [2586, 2587, 2588, 2589, 2590],
-  nature:      [1120, 1121, 1122, 1123, 1124],
+  technology:  [2523, 2524, 2525, 2526, 2527, 4007, 4008, 4009],
+  business:    [2586, 2587, 2588, 2589, 2590, 2867, 2868, 2869],
+  nature:      [1120, 1121, 1122, 1123, 1124, 1487, 1488, 1489],
   fitness:     [2580, 2581, 2582, 2583, 2584],
   crypto:      [2528, 2530, 2531, 2532, 2533],
   finance:     [2534, 2535, 2536, 2537, 2538],
-  food:        [2350, 2351, 2352, 2353, 2354],
   travel:      [2553, 2554, 2555, 2556, 2557],
-  people:      [2867, 2868, 2869, 2870, 2871],
-  abstract:    [1487, 1488, 1489, 1490, 1491],
-  default:     [2523, 2588, 1122, 2867, 1487],
+  people:      [2867, 2868, 2869, 2870, 2871, 4010, 4011, 4012],
+  abstract:    [1487, 1488, 1489, 1490, 1491, 4013],
+  default:     [2523, 2588, 1122, 2867, 1487, 4007, 4008],
 };
 
-function getVideoIds(topic: string): number[] {
-  const t = topic.toLowerCase();
-  if (t.match(/tech|ai|software|digital|computer|code/)) return MIXKIT_VIDEOS.technology;
-  if (t.match(/business|market|startup|brand|sales|agency/)) return MIXKIT_VIDEOS.business;
-  if (t.match(/nature|outdoor|landscape|forest|ocean/)) return MIXKIT_VIDEOS.nature;
-  if (t.match(/fit|health|workout|gym|sport|exercise/)) return MIXKIT_VIDEOS.fitness;
-  if (t.match(/crypto|bitcoin|blockchain|nft|defi|web3/)) return MIXKIT_VIDEOS.crypto;
-  if (t.match(/finance|money|invest|stock|wealth|trading/)) return MIXKIT_VIDEOS.finance;
-  if (t.match(/food|recipe|cook|eat|restaurant|meal/)) return MIXKIT_VIDEOS.food;
-  if (t.match(/travel|adventure|trip|explore|tour/)) return MIXKIT_VIDEOS.travel;
-  if (t.match(/people|person|human|social|life|motivat/)) return MIXKIT_VIDEOS.people;
-  return MIXKIT_VIDEOS.default;
+// Stop-words for keyword extraction
+const STOP_WORDS = new Set([
+  "the","a","an","and","or","is","in","of","to","for","with","how","why",
+  "what","when","where","that","this","are","was","were","be","been","being",
+  "have","has","had","do","does","did","will","would","could","should","may",
+  "might","about","from","by","as","at","on","into","more","most","best",
+  "top","your","you","my","we","our","us","i","it","its","all","any","one",
+  "two","three","five","ten","100","can","get","make","use","just","also",
+  "but","not","so","if","then","their","they","them","its","video","content",
+  "watch","like","share","comment","subscribe","click","here","now","help",
+]);
+
+function extractKeywords(title: string, topic?: string | null, niche?: string | null): string[] {
+  const text = `${title} ${topic ?? ""} ${niche ?? ""}`.toLowerCase();
+  const words = (text.match(/\b[a-z]{3,}\b/g) ?? []).filter(w => !STOP_WORDS.has(w));
+  return [...new Set(words)].slice(0, 12);
 }
 
-function mixkitVideoUrl(id: number) {
-  return `https://assets.mixkit.co/videos/${id}/${id}-360.mp4`;
+function detectCategory(title: string, topic?: string | null, niche?: string | null): string {
+  const t = `${title} ${topic ?? ""} ${niche ?? ""}`.toLowerCase();
+  if (t.match(/tech|ai|artificial|software|digital|computer|code|program|app|web|data|automation|robot|machine|internet|cyber/)) return "technology";
+  if (t.match(/business|market|startup|brand|sales|agency|company|entrepreneur|corporate|professional|office|product|client/)) return "business";
+  if (t.match(/nature|outdoor|landscape|forest|ocean|mountain|river|wildlife|plant|garden|tree|sky|earth|animal/)) return "nature";
+  if (t.match(/fit|health|workout|gym|sport|exercise|yoga|run|body|weight|muscle|wellness|diet|nutrition/)) return "fitness";
+  if (t.match(/crypto|bitcoin|blockchain|nft|defi|web3|token|coin|currency|decen/)) return "crypto";
+  if (t.match(/finance|money|invest|stock|wealth|trading|fund|bank|budget|saving|income|profit|revenue|financial/)) return "finance";
+  if (t.match(/travel|adventure|trip|explore|tour|journey|vacation|visit|destination|country|culture/)) return "travel";
+  if (t.match(/motivat|inspire|success|mindset|productivity|habit|goal|focus|growth|dream|confidence|self|personal/)) return "people";
+  return "default";
 }
-function mixkitThumbUrl(id: number) {
-  return `https://assets.mixkit.co/videos/${id}/${id}-thumb-360-0.jpg`;
+
+function mixkitVideoUrl(id: number) { return `https://assets.mixkit.co/videos/${id}/${id}-360.mp4`; }
+function mixkitThumbUrl(id: number) { return `https://assets.mixkit.co/videos/${id}/${id}-thumb-360-0.jpg`; }
+
+function pickVideos(category: string, count = 4): number[] {
+  const pool = MIXKIT_VIDEOS[category] ?? MIXKIT_VIDEOS.default;
+  const picked: number[] = [];
+  for (let i = 0; i < count; i++) picked.push(pool[i % pool.length]);
+  return picked;
 }
 
 // ---------------------------------------------------------------------------
 
 router.get("/projects", async (req, res): Promise<void> => {
   const query = ListProjectsQueryParams.safeParse(req.query);
-  if (!query.success) {
-    res.status(400).json({ error: query.error.message });
-    return;
-  }
+  if (!query.success) { res.status(400).json({ error: query.error.message }); return; }
   const limit = query.data.limit ?? 50;
   const offset = query.data.offset ?? 0;
-  const projects = await db
-    .select()
-    .from(projectsTable)
-    .orderBy(desc(projectsTable.createdAt))
-    .limit(limit)
-    .offset(offset);
+  const projects = await db.select().from(projectsTable).orderBy(desc(projectsTable.createdAt)).limit(limit).offset(offset);
   res.json(projects.map(serializeProject));
 });
 
 router.post("/projects", async (req, res): Promise<void> => {
   const parsed = CreateProjectBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
-    return;
-  }
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
   const [project] = await db.insert(projectsTable).values({
     title: parsed.data.title,
     topic: parsed.data.topic ?? null,
@@ -100,90 +109,115 @@ router.post("/projects", async (req, res): Promise<void> => {
 });
 
 router.get("/projects/:id", async (req, res): Promise<void> => {
-  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const id = parseInt(raw, 10);
+  const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, id));
-  if (!project) { res.status(404).json({ error: "Project not found" }); return; }
+  if (!project) { res.status(404).json({ error: "Not found" }); return; }
   res.json(serializeProject(project));
 });
 
 router.patch("/projects/:id", async (req, res): Promise<void> => {
-  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const id = parseInt(raw, 10);
+  const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   const parsed = UpdateProjectBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
-  const [updated] = await db.update(projectsTable).set({
-    ...parsed.data,
-    updatedAt: new Date(),
-  }).where(eq(projectsTable.id, id)).returning();
-  if (!updated) { res.status(404).json({ error: "Project not found" }); return; }
+  const [updated] = await db.update(projectsTable).set({ ...parsed.data, updatedAt: new Date() }).where(eq(projectsTable.id, id)).returning();
+  if (!updated) { res.status(404).json({ error: "Not found" }); return; }
   res.json(serializeProject(updated));
 });
 
 router.delete("/projects/:id", async (req, res): Promise<void> => {
-  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const id = parseInt(raw, 10);
+  const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   const [deleted] = await db.delete(projectsTable).where(eq(projectsTable.id, id)).returning();
-  if (!deleted) { res.status(404).json({ error: "Project not found" }); return; }
+  if (!deleted) { res.status(404).json({ error: "Not found" }); return; }
   res.sendStatus(204);
 });
 
+// ---------------------------------------------------------------------------
 // Pipeline: Generate Script
+// Extracts real keywords from title+topic+niche and builds a relevant script
+// ---------------------------------------------------------------------------
 router.post("/projects/:id/generate-script", async (req, res): Promise<void> => {
-  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const id = parseInt(raw, 10);
+  const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, id));
-  if (!project) { res.status(404).json({ error: "Project not found" }); return; }
+  if (!project) { res.status(404).json({ error: "Not found" }); return; }
 
-  const topic = project.topic ?? project.title;
-  const hook = `Did you know that ${topic} is changing everything right now?`;
-  const body = `In this video, we'll explore the most important aspects of ${topic}. From the fundamentals to advanced strategies, you'll walk away with actionable insights that you can implement immediately. The landscape is shifting rapidly, and those who adapt early will gain a massive advantage.`;
-  const cta = `Like and subscribe for more content on ${topic}. Drop your questions in the comments below!`;
+  const title  = project.title;
+  const topic  = project.topic ?? title;
+  const niche  = project.niche ?? "";
+  const kws    = extractKeywords(title, topic, niche);
+  const kwStr  = kws.slice(0, 4).join(", ");
+
+  const hook   = `${title} — here's what nobody tells you.`;
+  const body   = `In this video, we break down everything you need to know about ${topic || title}. `
+    + `Whether you're a beginner or already familiar with ${kws[0] ?? title}, you'll find `
+    + `actionable insights you can apply immediately. We'll cover ${kws.slice(0, 3).join(", ")} `
+    + `and why mastering these concepts puts you ahead of 95% of people in this space.`;
+  const cta    = `If this was valuable, smash that like button and subscribe — we post weekly on ${niche || title}. Drop a comment below!`;
+
+  const fullScript = `${hook}\n\n${body}\n\n${cta}`;
+
+  // Build scenes with per-scene keywords derived from title words
   const scenes = JSON.stringify([
-    { id: 1, text: hook, duration: 5, visualIntent: `dramatic opening shot related to ${topic}`, keywords: [topic, "dramatic", "cinematic"] },
-    { id: 2, text: "The landscape is shifting rapidly...", duration: 10, visualIntent: `dynamic b-roll showing ${topic} in action`, keywords: [topic, "dynamic", "action"] },
-    { id: 3, text: body, duration: 20, visualIntent: `informational visuals about ${topic}`, keywords: [topic, "information", "educational"] },
-    { id: 4, text: cta, duration: 5, visualIntent: "call to action overlay", keywords: ["subscribe", "like", "engage"] },
+    {
+      id: 1, text: hook, duration: 5,
+      visualIntent: `Opening shot — ${kws[0] ?? title} theme`,
+      keywords: kws.slice(0, 3),
+    },
+    {
+      id: 2, text: "Key concept breakdown...", duration: 15,
+      visualIntent: `${kws[1] ?? title} in action — dynamic b-roll`,
+      keywords: kws.slice(1, 4),
+    },
+    {
+      id: 3, text: body, duration: 25,
+      visualIntent: `Educational visuals — ${kws[2] ?? title}`,
+      keywords: kws.slice(2, 5),
+    },
+    {
+      id: 4, text: cta, duration: 5,
+      visualIntent: `Call-to-action overlay — ${niche || title}`,
+      keywords: kws.slice(0, 2),
+    },
   ]);
-  const keywords = JSON.stringify([topic, "viral", "trending", "educational", "tips", "strategy", "2025", "AI", "automation"]);
 
   const [updated] = await db.update(projectsTable).set({
     status: "scripting",
-    script: `${hook}\n\n${body}\n\n${cta}`,
+    script: fullScript,
     hook,
     cta,
     scenes,
-    keywords,
+    keywords: JSON.stringify(kws),
     updatedAt: new Date(),
   }).where(eq(projectsTable.id, id)).returning();
+
   res.json(serializeProject(updated));
 });
 
-// Pipeline: Fetch Assets — Mixkit CDN
+// ---------------------------------------------------------------------------
+// Pipeline: Fetch Assets — picks Mixkit clips matching title category
+// ---------------------------------------------------------------------------
 router.post("/projects/:id/generate-assets", async (req, res): Promise<void> => {
-  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const id = parseInt(raw, 10);
+  const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, id));
-  if (!project) { res.status(404).json({ error: "Project not found" }); return; }
+  if (!project) { res.status(404).json({ error: "Not found" }); return; }
 
-  const topic = project.topic ?? project.niche ?? project.title;
-  const videoIds = getVideoIds(topic);
-  // pick 4 videos from the category pool
-  const picked = videoIds.slice(0, 4);
+  const category = detectCategory(project.title, project.topic, project.niche);
+  const kws = extractKeywords(project.title, project.topic, project.niche);
+  const ids = pickVideos(category, 4);
 
-  const assets = JSON.stringify(picked.map((mixkitId, i) => ({
+  const assets = JSON.stringify(ids.map((mixkitId, i) => ({
     id: i + 1,
     type: "video",
     mixkitId,
     url: mixkitVideoUrl(mixkitId),
     thumbnail: mixkitThumbUrl(mixkitId),
     source: "mixkit",
-    keyword: topic,
+    category,
+    keyword: kws[i] ?? kws[0] ?? project.title,
   })));
 
   const [updated] = await db.update(projectsTable).set({
@@ -191,37 +225,41 @@ router.post("/projects/:id/generate-assets", async (req, res): Promise<void> => 
     assets,
     updatedAt: new Date(),
   }).where(eq(projectsTable.id, id)).returning();
+
   res.json(serializeProject(updated));
 });
 
-// Pipeline: Generate Voiceover — Mixkit SFX placeholder
+// ---------------------------------------------------------------------------
+// Pipeline: Generate Voiceover (simulated — marks step done)
+// ---------------------------------------------------------------------------
 router.post("/projects/:id/generate-voiceover", async (req, res): Promise<void> => {
-  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const id = parseInt(raw, 10);
+  const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, id));
-  if (!project) { res.status(404).json({ error: "Project not found" }); return; }
+  if (!project) { res.status(404).json({ error: "Not found" }); return; }
 
   const [updated] = await db.update(projectsTable).set({
     status: "voiceover",
-    voiceoverUrl: "https://assets.mixkit.co/active_storage/sfx/213/213-preview.mp3",
+    voiceoverUrl: "https://assets.mixkit.co/music/738/738.mp3",
     updatedAt: new Date(),
   }).where(eq(projectsTable.id, id)).returning();
+
   res.json(serializeProject(updated));
 });
 
-// Pipeline: Render — use Mixkit video as output
+// ---------------------------------------------------------------------------
+// Pipeline: Render — uses category-matched Mixkit clip as output video
+// Completes in 800 ms via async DB update; client polls for "completed"
+// ---------------------------------------------------------------------------
 router.post("/projects/:id/render", async (req, res): Promise<void> => {
-  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const id = parseInt(raw, 10);
+  const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, id));
-  if (!project) { res.status(404).json({ error: "Project not found" }); return; }
+  if (!project) { res.status(404).json({ error: "Not found" }); return; }
 
-  // Pick a representative Mixkit output video based on topic
-  const topic = project.topic ?? project.niche ?? project.title;
-  const ids = getVideoIds(topic);
-  const outputId = ids[0] ?? 2523;
+  const category = detectCategory(project.title, project.topic, project.niche);
+  const ids = pickVideos(category, 4);
+  const outputId = ids[0];
 
   const [updated] = await db.update(projectsTable).set({
     status: "rendering",
@@ -229,7 +267,7 @@ router.post("/projects/:id/render", async (req, res): Promise<void> => {
     updatedAt: new Date(),
   }).where(eq(projectsTable.id, id)).returning();
 
-  // Simulate async render
+  // Simulate render — completes after 800 ms; frontend polls for status change
   setTimeout(async () => {
     await db.update(projectsTable).set({
       status: "completed",
