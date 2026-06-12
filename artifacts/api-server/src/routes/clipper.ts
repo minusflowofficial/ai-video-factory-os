@@ -1,11 +1,13 @@
 /**
- * Clipper — Full pipeline: YouTube → yt-dlp download → AI analysis → FFmpeg clip + captions
+ * Clipper pipeline
  *
- * POST /api/clipper/process           — start full pipeline, returns { jobId }
+ * POST /api/clipper/upload            — upload a local video file → { filePath }
+ * POST /api/clipper/process           — start full pipeline (YouTube URL)
+ * POST /api/clipper/process-local     — start pipeline from uploaded file
  * GET  /api/clipper/status/:jobId     — poll job progress + clip results
  * GET  /api/clipper/download/:token   — download a generated clip
- * GET  /api/clipper/cookies-status    — check if cookies.txt is configured
- * POST /api/clipper/save-cookies      — save Netscape cookies.txt content
+ * GET  /api/clipper/cookies-status    — check cookies.txt
+ * POST /api/clipper/save-cookies      — save Netscape cookies content
  */
 
 import { Router, type IRouter } from "express";
@@ -14,14 +16,24 @@ import * as path from "path";
 import { execFile, spawn } from "child_process";
 import { promisify } from "util";
 import * as crypto from "crypto";
+import multer from "multer";
 
 const execFileAsync = promisify(execFile);
 const router: IRouter = Router();
 const PYTHON = process.env.PYTHON_PATH ?? "python3";
 const CREATE_CLIP_SCRIPT = path.resolve("../../scripts/create_clip.py");
-
-// Persistent cookies file stored in workspace (survives restarts)
 const COOKIES_PATH = path.resolve("../../.youtube-cookies.txt");
+
+// ── File upload (up to 4 GB) ──────────────────────────────────────────────────
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    const dir = "/tmp/clipper-uploads";
+    fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (_req, _file, cb) => cb(null, `${Date.now()}-${crypto.randomBytes(6).toString("hex")}.mp4`),
+});
+const upload = multer({ storage, limits: { fileSize: 4 * 1024 * 1024 * 1024 } });
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface ClipResult {
@@ -30,10 +42,9 @@ interface ClipResult {
   status: "pending" | "processing" | "done" | "error";
   downloadToken?: string; sizeMb?: number; error?: string;
 }
-
 interface ClipJob {
   id: string;
-  status: "queued" | "downloading" | "transcribing" | "analyzing" | "creating" | "done" | "error";
+  status: "queued" | "uploading" | "downloading" | "transcribing" | "analyzing" | "creating" | "done" | "error";
   stepLabel: string; progress: number;
   clips: ClipResult[]; totalClips: number; doneClips: number;
   videoTitle?: string; error?: string; createdAt: number; dir: string;
@@ -46,7 +57,7 @@ const downloadTokens = new Map<string, { filePath: string; expiresAt: number }>(
 setInterval(() => {
   const now = Date.now();
   for (const [id, job] of jobs.entries()) {
-    if (now - job.createdAt > 60 * 60_000) {
+    if (now - job.createdAt > 2 * 60 * 60_000) {
       fs.promises.rm(job.dir, { recursive: true, force: true }).catch(() => {});
       jobs.delete(id);
     }
@@ -80,56 +91,52 @@ function timeStrToSeconds(t: string): number {
 }
 
 async function hasCookies(): Promise<boolean> {
-  try {
-    const stat = await fs.promises.stat(COOKIES_PATH);
-    return stat.size > 50;
-  } catch {
-    return false;
-  }
+  try { return (await fs.promises.stat(COOKIES_PATH)).size > 50; }
+  catch { return false; }
 }
 
-// ── Download YouTube video via yt-dlp ────────────────────────────────────────
+// ── yt-dlp download ───────────────────────────────────────────────────────────
 async function downloadVideo(videoId: string, outDir: string, job: ClipJob): Promise<string> {
-  job.status = "downloading";
+  job.status   = "downloading";
   job.stepLabel = "Downloading YouTube video…";
-  job.progress = 5;
+  job.progress  = 5;
 
-  const url = `https://www.youtube.com/watch?v=${videoId}`;
+  const url            = `https://www.youtube.com/watch?v=${videoId}`;
   const outputTemplate = path.join(outDir, "source.%(ext)s");
-  const cookiesExist = await hasCookies();
+  const cookiesExist   = await hasCookies();
 
-  // Find node path for yt-dlp JS runtime
   let nodePath = "node";
-  try {
-    const { stdout } = await execFileAsync("which", ["node"]);
-    nodePath = stdout.trim();
-  } catch { /* use "node" as default */ }
+  try { nodePath = (await execFileAsync("which", ["node"])).stdout.trim(); } catch { /* noop */ }
 
-  const args: string[] = [
+  // Format priority:
+  //   18  = 360p progressive (no PO token needed, very fast)
+  //   22  = 720p progressive (no PO token needed)
+  //   worst[ext=mp4] = fallback
+  //   adaptive (needs cookies for some videos)
+  const FORMAT =
+    "18/22/worst[ext=mp4]/bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best";
+
+  const args = [
     "--js-runtimes", `node:${nodePath}`,
-    "-f", "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[ext=mp4]",
+    "-f", FORMAT,
     "--merge-output-format", "mp4",
     "--no-playlist",
     "--no-warnings",
+    "--concurrent-fragments", "8",   // parallel fragment download for speed
     "-o", outputTemplate,
   ];
-
-  if (cookiesExist) {
-    args.push("--cookies", COOKIES_PATH);
-  }
-
+  if (cookiesExist) args.push("--cookies", COOKIES_PATH);
   args.push(url);
 
   await new Promise<void>((resolve, reject) => {
     const proc = spawn("yt-dlp", args);
     let stderr = "";
-
     proc.stdout.on("data", (d: Buffer) => {
       const line = d.toString();
-      const match = line.match(/(\d+(?:\.\d+)?)%/);
-      if (match) {
-        job.progress = Math.min(30, 5 + Math.round(parseFloat(match[1]) * 0.25));
-        job.stepLabel = `Downloading… ${match[1]}%`;
+      const m = line.match(/(\d+(?:\.\d+)?)%/);
+      if (m) {
+        job.progress  = Math.min(30, 5 + Math.round(parseFloat(m[1]) * 0.25));
+        job.stepLabel = `Downloading… ${m[1]}%`;
       }
     });
     proc.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
@@ -137,29 +144,29 @@ async function downloadVideo(videoId: string, outDir: string, job: ClipJob): Pro
       if (code === 0) { resolve(); return; }
       const msg = stderr.toLowerCase();
       if (msg.includes("sign in") || msg.includes("bot") || msg.includes("login")) {
-        reject(new Error("YouTube bot detection triggered. Please add your YouTube cookies in the Cookies panel above the URL input, then try again."));
-      } else if (msg.includes("geo")) {
-        reject(new Error("Video is geo-restricted and unavailable in this region."));
+        reject(new Error(
+          "YouTube bot detection triggered. Add your YouTube cookies using the panel above, then retry."
+        ));
       } else if (msg.includes("private") || msg.includes("unavailable")) {
         reject(new Error("Video is private or unavailable."));
       } else {
-        reject(new Error(`Download failed: ${stderr.slice(-300)}`));
+        reject(new Error(`Download failed: ${stderr.slice(-400)}`));
       }
     });
     proc.on("error", reject);
   });
 
   const files = await fs.promises.readdir(outDir);
-  const mp4 = files.find(f => f.startsWith("source") && f.endsWith(".mp4"));
-  if (!mp4) throw new Error("Downloaded file not found after yt-dlp completed.");
+  const mp4 = files.find(f => f.startsWith("source") && (f.endsWith(".mp4") || f.endsWith(".webm")));
+  if (!mp4) throw new Error("Downloaded file not found.");
   return path.join(outDir, mp4);
 }
 
-// ── Fetch transcript from NoteGPT ─────────────────────────────────────────────
+// ── NoteGPT transcript ────────────────────────────────────────────────────────
 async function fetchTranscript(videoId: string, job: ClipJob): Promise<{ segments: any[]; title: string }> {
-  job.status = "transcribing";
+  job.status    = "transcribing";
   job.stepLabel = "Fetching transcript…";
-  job.progress = 33;
+  job.progress  = 33;
 
   const userinfoRes = await fetch("https://notegpt.io/user/v2/userinfo", {
     headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
@@ -173,7 +180,7 @@ async function fetchTranscript(videoId: string, job: ClipJob): Promise<{ segment
     { headers: { "User-Agent": "Mozilla/5.0", Cookie: `sbox-guid=${sboxGuid}; anonymous_user_id=${anonId}` } },
   );
   const data = await txRes.json() as any;
-  if (data.code !== 100000) throw new Error(data.message ?? "Transcript not available");
+  if (data.code !== 100000) throw new Error(data.message ?? "Transcript unavailable");
 
   const tx   = data.data;
   const segs = tx.transcripts?.en?.custom
@@ -181,24 +188,24 @@ async function fetchTranscript(videoId: string, job: ClipJob): Promise<{ segment
   return { segments: segs, title: tx.videoInfo?.name ?? "Video" };
 }
 
-// ── AI analysis via OpenRouter ─────────────────────────────────────────────────
+// ── OpenRouter AI analysis ────────────────────────────────────────────────────
 async function analyzeWithAI(
   segments: any[], videoTitle: string, numClips: number, minDuration: number,
   captionStyle: string, hookFilter: string | null, aspectRatio: string, job: ClipJob,
 ): Promise<any[]> {
-  job.status = "analyzing";
+  job.status    = "analyzing";
   job.stepLabel = "AI analyzing for viral clips…";
-  job.progress = 40;
+  job.progress  = 40;
 
   const apiKey = process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY;
   const apiUrl = (process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL ?? "").replace(/\/$/, "");
   if (!apiKey || !apiUrl) throw new Error("OpenRouter AI integration not configured");
 
-  const trimmed = segments.slice(0, 150);
-  const transcriptText = trimmed.map((s: any) => `[${s.start}] ${s.text}`).join("\n").slice(0, 12000);
+  const transcriptText = segments.slice(0, 150)
+    .map((s: any) => `[${s.start}] ${s.text}`).join("\n").slice(0, 12000);
   const hookConstraint = hookFilter
     ? `IMPORTANT: Only suggest clips with hookType = "${hookFilter}".`
-    : `hookType options: Curiosity, Shock, Debate, Story, Emotional, Educational, Contrarian, Inspirational, Controversial`;
+    : "hookType options: Curiosity, Shock, Story, Emotional, Educational, Inspirational, Controversial";
 
   const res = await fetch(`${apiUrl}/chat/completions`, {
     method: "POST",
@@ -207,32 +214,31 @@ async function analyzeWithAI(
       model: "qwen/qwen3.6-flash",
       max_tokens: 8192, temperature: 0.7,
       messages: [
-        { role: "system", content: "You are a viral short-form video expert. Output ONLY valid JSON arrays, no markdown." },
+        { role: "system", content: "You are a viral short-form video expert. Output ONLY valid JSON arrays, no markdown, no thinking tags." },
         { role: "user",   content: `Find the ${numClips} best viral clips from this video.
 
 Video: "${videoTitle}"
 Settings: ${numClips} clips, min ${minDuration}s each, aspect ${aspectRatio}, captions: ${captionStyle}
 ${hookConstraint}
 
-TRANSCRIPT:
-${transcriptText}
+TRANSCRIPT (timestamps in MM:SS format):
+${transcriptText || "No transcript available — choose interesting timestamps spread across the video."}
 
 Return ONLY a JSON array:
-[{"id":1,"startTime":"00:01:23","endTime":"00:02:45","duration":"82s","topic":"one sentence","hookType":"Curiosity","viralScore":9,"platform":"TikTok, YouTube Shorts","hook":"hook under 12 words","punchline":"key reveal","titleIdeas":["T1","T2","T3"],"hashtags":["#tag1","#tag2"],"captionStyle":"${captionStyle}"}]` },
+[{"id":1,"startTime":"00:01:23","endTime":"00:02:45","duration":"82s","topic":"one sentence","hookType":"Curiosity","viralScore":9,"hook":"hook under 12 words","captionStyle":"${captionStyle}"}]` },
       ],
     }),
   });
-
-  if (!res.ok) throw new Error(`AI API ${res.status}: ${await res.text()}`);
+  if (!res.ok) throw new Error(`AI API ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const aiData = await res.json() as any;
   const raw = aiData.choices?.[0]?.message?.content ?? "[]";
-  const match = raw.match(/\[[\s\S]*\]/);
-  if (!match) throw new Error("No JSON array returned from AI");
+  const match = raw.match(/\[[\s\S]*?\]/);
+  if (!match) throw new Error("No JSON array from AI");
   job.progress = 50;
   return JSON.parse(match[0]);
 }
 
-// ── Create a single clip via Python ──────────────────────────────────────────
+// ── Create a single clip ──────────────────────────────────────────────────────
 async function createClip(
   clip: any, videoPath: string, segments: any[], aspectRatio: string,
   captionStyle: string, outDir: string,
@@ -271,34 +277,49 @@ async function createClip(
   if (!result.ok) throw new Error(result.error ?? "Clip creation failed");
 
   const token = crypto.randomUUID();
-  downloadTokens.set(token, { filePath: outPath, expiresAt: Date.now() + 2 * 60 * 60_000 });
+  downloadTokens.set(token, { filePath: outPath, expiresAt: Date.now() + 4 * 60 * 60_000 });
   return { downloadToken: token, sizeMb: result.size_mb };
 }
 
-// ── Full pipeline ─────────────────────────────────────────────────────────────
+// ── Full pipeline (shared by URL and local file paths) ────────────────────────
 async function runPipeline(job: ClipJob, opts: {
-  videoId: string; numClips: number; aspectRatio: string;
+  videoId?: string; localVideoPath?: string; numClips: number; aspectRatio: string;
   captionStyle: string; hookFilter: string | null; minDuration: number;
 }) {
-  const { videoId, numClips, aspectRatio, captionStyle, hookFilter, minDuration } = opts;
+  const { videoId, localVideoPath, numClips, aspectRatio, captionStyle, hookFilter, minDuration } = opts;
   try {
-    // 1. Download
-    const videoPath = await downloadVideo(videoId, job.dir, job);
+    // 1. Get video path
+    let videoPath: string;
+    if (localVideoPath) {
+      videoPath = localVideoPath;
+      job.status    = "transcribing";
+      job.stepLabel = "Video loaded — fetching transcript…";
+      job.progress  = 15;
+    } else if (videoId) {
+      videoPath = await downloadVideo(videoId, job.dir, job);
+    } else {
+      throw new Error("No video source provided");
+    }
 
-    // 2. Transcript (non-fatal)
+    // 2. Transcript (non-fatal — also skip for local videos without YouTube ID)
     let segments: any[] = [];
-    try {
-      const tx = await fetchTranscript(videoId, job);
-      segments = tx.segments;
-      job.videoTitle = tx.title;
-    } catch {
-      job.stepLabel = "Transcript unavailable — creating clips without captions…";
+    if (videoId) {
+      try {
+        const tx = await fetchTranscript(videoId, job);
+        segments = tx.segments;
+        job.videoTitle = tx.title;
+      } catch {
+        job.stepLabel = "Transcript unavailable — creating clips without captions…";
+      }
     }
 
     // 3. AI analysis
-    const aiClips = await analyzeWithAI(segments, job.videoTitle ?? "Video", numClips, minDuration, captionStyle, hookFilter, aspectRatio, job);
+    const aiClips = await analyzeWithAI(
+      segments, job.videoTitle ?? "Uploaded Video", numClips, minDuration,
+      captionStyle, hookFilter, aspectRatio, job,
+    );
 
-    // 4. Init clip results
+    // 4. Init clip state
     job.totalClips = aiClips.length;
     job.clips = aiClips.map((c: any) => ({
       id: c.id, title: c.topic ?? `Clip ${c.id}`, hook: c.hook ?? "",
@@ -306,29 +327,31 @@ async function runPipeline(job: ClipJob, opts: {
       startTime: c.startTime, endTime: c.endTime, duration: c.duration ?? "",
       status: "pending" as const,
     }));
-    job.status = "creating";
+    job.status    = "creating";
+    job.stepLabel = `Creating ${aiClips.length} clip${aiClips.length !== 1 ? "s" : ""} in parallel…`;
+    job.progress  = 52;
 
-    // 5. Create clips sequentially
-    for (let i = 0; i < aiClips.length; i++) {
-      const aiClip  = aiClips[i];
-      const jobClip = job.clips[i];
-      if (!jobClip) continue;
-
-      jobClip.status = "processing";
-      job.stepLabel  = `Creating clip ${i + 1} of ${aiClips.length}…`;
-      job.progress   = 50 + Math.round((i / aiClips.length) * 45);
-
-      try {
-        const { downloadToken, sizeMb } = await createClip(aiClip, videoPath, segments, aspectRatio, captionStyle, job.dir);
-        jobClip.status = "done";
-        jobClip.downloadToken = downloadToken;
-        jobClip.sizeMb = sizeMb;
-        job.doneClips++;
-      } catch (err: any) {
-        jobClip.status = "error";
-        jobClip.error  = err.message?.slice(0, 200);
-      }
-    }
+    // 5. Create ALL clips in PARALLEL for speed
+    await Promise.allSettled(
+      aiClips.map(async (aiClip: any, i: number) => {
+        const jobClip = job.clips[i];
+        if (!jobClip) return;
+        jobClip.status = "processing";
+        try {
+          const { downloadToken, sizeMb } = await createClip(
+            aiClip, videoPath, segments, aspectRatio, captionStyle, job.dir,
+          );
+          jobClip.status        = "done";
+          jobClip.downloadToken = downloadToken;
+          jobClip.sizeMb        = sizeMb;
+          job.doneClips++;
+          job.progress = Math.min(98, 52 + Math.round((job.doneClips / job.totalClips) * 46));
+        } catch (err: any) {
+          jobClip.status = "error";
+          jobClip.error  = err.message?.slice(0, 200);
+        }
+      }),
+    );
 
     job.status    = "done";
     job.progress  = 100;
@@ -356,18 +379,22 @@ router.post("/clipper/save-cookies", async (req, res): Promise<void> => {
   try {
     await fs.promises.writeFile(COOKIES_PATH, cookies, "utf8");
     res.json({ ok: true });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-// POST /api/clipper/process
-router.post("/clipper/process", async (req, res): Promise<void> => {
-  const {
-    url, numClips = 5, aspectRatio = "9:16",
-    captionStyle = "Bold Yellow", hookFilter = null, minDuration = 30,
-  } = req.body ?? {};
+// POST /api/clipper/upload  — multipart file upload
+router.post("/clipper/upload", (req, res, next) => {
+  upload.single("video")(req, res, (err) => {
+    if (err) { res.status(400).json({ error: err.message }); return; }
+    if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return; }
+    res.json({ filePath: req.file.path, originalName: req.file.originalname, sizeMb: Math.round(req.file.size / 1024 / 1024 * 10) / 10 });
+    next();
+  });
+});
 
+// POST /api/clipper/process — YouTube URL pipeline
+router.post("/clipper/process", async (req, res): Promise<void> => {
+  const { url, numClips = 5, aspectRatio = "9:16", captionStyle = "Bold Yellow", hookFilter = null, minDuration = 30 } = req.body ?? {};
   if (!url) { res.status(400).json({ error: "url required" }); return; }
   const videoId = extractYouTubeId(String(url));
   if (!videoId) { res.status(400).json({ error: "Invalid YouTube URL" }); return; }
@@ -375,13 +402,28 @@ router.post("/clipper/process", async (req, res): Promise<void> => {
   const jobId = crypto.randomUUID();
   const dir   = `/tmp/clipper-job-${jobId}`;
   await fs.promises.mkdir(dir, { recursive: true });
+  const job: ClipJob = { id: jobId, status: "queued", stepLabel: "Starting…", progress: 0, clips: [], totalClips: 0, doneClips: 0, createdAt: Date.now(), dir };
+  jobs.set(jobId, job);
+  runPipeline(job, { videoId, numClips, aspectRatio, captionStyle, hookFilter, minDuration }).catch(() => {});
+  res.json({ jobId });
+});
 
+// POST /api/clipper/process-local — uploaded file pipeline
+router.post("/clipper/process-local", async (req, res): Promise<void> => {
+  const { filePath, videoTitle, numClips = 5, aspectRatio = "9:16", captionStyle = "Bold Yellow", hookFilter = null, minDuration = 30 } = req.body ?? {};
+  if (!filePath) { res.status(400).json({ error: "filePath required" }); return; }
+  if (!fs.existsSync(filePath)) { res.status(400).json({ error: "File not found" }); return; }
+
+  const jobId = crypto.randomUUID();
+  const dir   = `/tmp/clipper-job-${jobId}`;
+  await fs.promises.mkdir(dir, { recursive: true });
   const job: ClipJob = {
     id: jobId, status: "queued", stepLabel: "Starting…", progress: 0,
     clips: [], totalClips: 0, doneClips: 0, createdAt: Date.now(), dir,
+    videoTitle: videoTitle ?? "Uploaded Video",
   };
   jobs.set(jobId, job);
-  runPipeline(job, { videoId, numClips, aspectRatio, captionStyle, hookFilter, minDuration }).catch(() => {});
+  runPipeline(job, { localVideoPath: filePath, numClips, aspectRatio, captionStyle, hookFilter, minDuration }).catch(() => {});
   res.json({ jobId });
 });
 
@@ -414,9 +456,7 @@ router.get("/clipper/download/:token", async (req, res): Promise<void> => {
     res.setHeader("Content-Disposition", `attachment; filename="clip.mp4"`);
     res.setHeader("Content-Length", stat.size);
     fs.createReadStream(entry.filePath).pipe(res);
-  } catch {
-    res.status(500).json({ error: "File not found" });
-  }
+  } catch { res.status(500).json({ error: "File not found" }); }
 });
 
 export default router;
