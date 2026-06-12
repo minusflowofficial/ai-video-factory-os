@@ -3,7 +3,7 @@
  *
  * Routes:
  *   POST /api/clipper/transcript  — fetch transcript via NoteGPT API
- *   POST /api/clipper/analyze     — AI viral clip analysis (Claude Haiku)
+ *   POST /api/clipper/analyze     — AI viral clip analysis (Groq via OpenRouter)
  *   POST /api/clipper/clip        — face-centered clip extraction (Python + OpenCV)
  *   GET  /api/clipper/clip/:token — download a generated clip
  */
@@ -76,14 +76,14 @@ router.post("/clipper/transcript", async (req, res): Promise<void> => {
 });
 
 // ---------------------------------------------------------------------------
-// Analyze: AI viral clip detection using Claude
+// Analyze: AI viral clip detection using Groq (via OpenRouter)
 // ---------------------------------------------------------------------------
 router.post("/clipper/analyze", async (req, res): Promise<void> => {
   const { transcripts, videoInfo, language = "en" } = req.body ?? {};
   if (!transcripts) { res.status(400).json({ error: "transcripts required" }); return; }
 
-  const apiKey = process.env.AI_INTEGRATIONS_ANTHROPIC_API_KEY;
-  const apiUrl = (process.env.AI_INTEGRATIONS_ANTHROPIC_BASE_URL ?? "https://api.anthropic.com").replace(/\/$/, "");
+  const apiKey = process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY;
+  const apiUrl = (process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL ?? "https://openrouter.ai/api").replace(/\/$/, "");
 
   if (!apiKey) {
     res.status(402).json({ error: "AI integration not configured. Contact support." });
@@ -105,11 +105,11 @@ router.post("/clipper/analyze", async (req, res): Promise<void> => {
   const transcriptText = segments
     .map(s => `[${s.start}] ${s.text}`)
     .join("\n")
-    .slice(0, 10000); // Cap at 10k chars for Claude Haiku context
+    .slice(0, 12000); // Groq models have large context
 
-  const prompt = `You are an elite YouTube Shorts, TikTok, and Instagram Reels expert.
+  const systemPrompt = `You are an elite YouTube Shorts, TikTok, and Instagram Reels viral content expert. You analyze transcripts and identify the most viral-worthy clip segments. You ONLY output valid JSON arrays — no markdown, no explanation, no preamble.`;
 
-Analyze this transcript and find the BEST viral short-form clip opportunities.
+  const userPrompt = `Analyze this transcript and find the BEST viral short-form clip opportunities.
 
 Video: "${title}" by ${author}
 Duration: ${duration}
@@ -119,7 +119,7 @@ ${transcriptText}
 
 ---
 
-Find 5-10 clips scoring 7+ viral potential. Output ONLY a valid JSON array — no markdown, no explanation:
+Find 5-10 clips scoring 7+ viral potential. Output ONLY a valid JSON array:
 
 [
   {
@@ -146,35 +146,46 @@ Find 5-10 clips scoring 7+ viral potential. Output ONLY a valid JSON array — n
 ]
 
 hookType options: Curiosity, Shock, Debate, Story, Emotional, Educational, Contrarian, Inspirational, Controversial, Fear, Warning
-Return ONLY the JSON array.`;
+Return ONLY the JSON array. No markdown. No explanation.`;
+
+  const MODEL = "qwen/qwen3.6-flash";
+  // Replit AI Integrations proxy: base URL already includes path, append /chat/completions
+  const completionsUrl = `${apiUrl}/chat/completions`;
 
   try {
-    const aiRes = await fetch(`${apiUrl}/v1/messages`, {
+    const aiRes = await fetch(completionsUrl, {
       method: "POST",
       headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
+        "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
+        "HTTP-Referer": "https://ai-video-factory.replit.app",
+        "X-Title": "AI Video Factory OS",
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5",
-        max_tokens: 4000,
-        messages: [{ role: "user", content: prompt }],
+        model: MODEL,
+        max_tokens: 8192,
+        temperature: 0.7,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
       }),
     });
 
     if (!aiRes.ok) {
-      throw new Error(`Claude API ${aiRes.status}: ${await aiRes.text()}`);
+      const errText = await aiRes.text();
+      throw new Error(`AI API ${aiRes.status}: ${errText}`);
     }
 
     const aiData = await aiRes.json() as any;
-    const raw    = aiData.content?.[0]?.text ?? "[]";
+    const raw    = aiData.choices?.[0]?.message?.content ?? "[]";
 
-    // Parse JSON — be lenient with surrounding text
+    // Parse JSON — be lenient with surrounding text/markdown fences
     const jsonMatch = raw.match(/\[[\s\S]*\]/);
-    const clips = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
+    if (!jsonMatch) throw new Error("No JSON array found in AI response");
+    const clips = JSON.parse(jsonMatch[0]);
 
-    res.json({ clips, transcriptSegments: segments.length, model: "claude-haiku-4-5" });
+    res.json({ clips, transcriptSegments: segments.length, model: MODEL });
   } catch (err: any) {
     res.status(500).json({ error: err.message ?? "AI analysis failed" });
   }
