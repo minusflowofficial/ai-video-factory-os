@@ -1,13 +1,12 @@
 import { AppLayout } from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useGetSettings, useUpdateSettings } from "@workspace/api-client-react";
 import { useState, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getGetSettingsQueryKey } from "@workspace/api-client-react";
-import { Settings2, Key, Database, Sliders, Save, CheckCircle2 } from "lucide-react";
+import { Key, Database, Sliders, Save, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function SettingsPage() {
@@ -45,7 +44,6 @@ export default function SettingsPage() {
   }, [settings]);
 
   const handleSave = () => {
-    // Only send fields that actually have values (don't overwrite with empty strings if they are currently set)
     const updateData: any = {};
     if (formData.geminiKey) updateData.geminiKey = formData.geminiKey;
     if (formData.openaiKey) updateData.openaiKey = formData.openaiKey;
@@ -64,7 +62,6 @@ export default function SettingsPage() {
         toast("Settings saved successfully", {
           icon: <CheckCircle2 className="text-emerald-500 w-4 h-4" />
         });
-        // Clear sensitive inputs after save
         setFormData(prev => ({
           ...prev,
           geminiKey: "", openaiKey: "", claudeKey: "", groqKey: "", pexelsKey: ""
@@ -94,7 +91,7 @@ export default function SettingsPage() {
           <Button 
             onClick={handleSave} 
             disabled={updateSettings.isPending}
-            className="bg-primary hover:bg-primary/90 text-white shadow-lg shadow-primary/20"
+            className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20 font-semibold"
           >
             <Save className="w-4 h-4 mr-2" />
             {updateSettings.isPending ? "Saving..." : "Save Settings"}
@@ -105,7 +102,7 @@ export default function SettingsPage() {
           {/* AI Providers */}
           <div className="glass-panel p-6 rounded-2xl border border-white/5">
             <h2 className="text-xl font-heading font-semibold text-white mb-6 flex items-center gap-2">
-              <Key className="w-5 h-5 text-violet-400" /> AI Provider Keys
+              <Key className="w-5 h-5 text-amber-400" /> AI Provider Keys
             </h2>
             
             <div className="space-y-6">
@@ -142,18 +139,23 @@ export default function SettingsPage() {
           {/* Asset Sources */}
           <div className="glass-panel p-6 rounded-2xl border border-white/5">
             <h2 className="text-xl font-heading font-semibold text-white mb-6 flex items-center gap-2">
-              <Database className="w-5 h-5 text-cyan-400" /> Asset & Media Sources
+              <Database className="w-5 h-5 text-sky-400" /> Asset & Media Sources
             </h2>
             
+            <div className="mb-6 p-4 bg-amber-500/8 border border-amber-500/20 rounded-xl">
+              <p className="text-sm text-amber-300 font-medium mb-1">Mixkit CDN Active</p>
+              <p className="text-xs text-zinc-400">Free cinematic videos, music tracks, and sound effects are fetched from Mixkit's CDN. No key required.</p>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start mb-6">
               <div className="md:col-span-4">
                 <label className="text-sm font-medium text-white block mb-1">Pexels API Key</label>
-                <p className="text-xs text-zinc-500">For premium B-roll footage.</p>
+                <p className="text-xs text-zinc-500">Optional: for additional premium B-roll footage.</p>
               </div>
               <div className="md:col-span-8 relative">
                 <Input 
                   type="password"
-                  placeholder={settings?.pexelsKeySet ? "•••••••••••••••••••• (Configured)" : "Enter Pexels API Key"}
+                  placeholder={settings?.pexelsKeySet ? "•••••••••••••••••••• (Configured)" : "Enter Pexels API Key (optional)"}
                   value={formData.pexelsKey}
                   onChange={(e) => setFormData({...formData, pexelsKey: e.target.value})}
                   className="bg-black/50 border-white/10 text-white"
@@ -171,7 +173,7 @@ export default function SettingsPage() {
                   <SelectTrigger className="bg-black/50 border-white/10 text-white">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className="bg-[#0a0a0f] border-white/10">
+                  <SelectContent className="bg-[#080b10] border-white/10">
                     <SelectItem value="supabase">Supabase Storage</SelectItem>
                     <SelectItem value="s3">AWS S3</SelectItem>
                     <SelectItem value="gcs">Google Cloud Storage</SelectItem>
@@ -194,7 +196,7 @@ export default function SettingsPage() {
                   <SelectTrigger className="bg-black/50 border-white/10 text-white">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className="bg-[#0a0a0f] border-white/10">
+                  <SelectContent className="bg-[#080b10] border-white/10">
                     <SelectItem value="gemini">Gemini Fast</SelectItem>
                     <SelectItem value="claude">Claude Precision</SelectItem>
                     <SelectItem value="openai">GPT-4 Logic</SelectItem>
@@ -209,7 +211,7 @@ export default function SettingsPage() {
                   <SelectTrigger className="bg-black/50 border-white/10 text-white">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className="bg-[#0a0a0f] border-white/10">
+                  <SelectContent className="bg-[#080b10] border-white/10">
                     <SelectItem value="30s">30 Seconds</SelectItem>
                     <SelectItem value="60s">60 Seconds</SelectItem>
                     <SelectItem value="90s">90 Seconds</SelectItem>
@@ -223,7 +225,7 @@ export default function SettingsPage() {
                   <SelectTrigger className="bg-black/50 border-white/10 text-white">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className="bg-[#0a0a0f] border-white/10">
+                  <SelectContent className="bg-[#080b10] border-white/10">
                     <SelectItem value="9:16">9:16 (Shorts/Reels)</SelectItem>
                     <SelectItem value="16:9">16:9 (YouTube)</SelectItem>
                     <SelectItem value="1:1">1:1 (Square)</SelectItem>

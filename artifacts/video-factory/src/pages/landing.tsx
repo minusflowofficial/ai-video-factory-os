@@ -2,7 +2,7 @@ import { MarketingLayout } from "@/components/MarketingLayout";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
-import { Sparkles, Video, Settings, Layout, Zap, ArrowRight, Play, CheckCircle2 } from "lucide-react";
+import { Clapperboard, Video, Settings, Layout, Zap, ArrowRight, Play, CheckCircle2 } from "lucide-react";
 import heroStudioImage from "@/assets/images/hero-studio.png";
 
 export default function LandingPage() {
@@ -24,8 +24,8 @@ export default function LandingPage() {
       {/* Hero Section */}
       <section className="relative pt-32 pb-20 md:pt-48 md:pb-32 overflow-hidden">
         {/* Background effects */}
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-violet-900/20 via-[#0a0a0f] to-[#0a0a0f] -z-10" />
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-3xl h-[400px] bg-primary/20 blur-[120px] rounded-full -z-10 opacity-50" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-amber-900/15 via-[#080b10] to-[#080b10] -z-10" />
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-3xl h-[400px] bg-amber-500/10 blur-[120px] rounded-full -z-10" />
         
         <div className="container mx-auto px-4 text-center">
           <motion.div
@@ -35,13 +35,13 @@ export default function LandingPage() {
             className="max-w-4xl mx-auto space-y-8"
           >
             <motion.div variants={fadeIn} className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-sm font-medium text-zinc-300">
-              <Sparkles className="w-4 h-4 text-cyan-400" />
+              <Clapperboard className="w-4 h-4 text-amber-400" />
               <span>The cinematic AI production studio</span>
             </motion.div>
             
             <motion.h1 variants={fadeIn} className="text-5xl md:text-7xl font-heading font-bold tracking-tight leading-tight">
               Create cinematic videos at{" "}
-              <span className="bg-gradient-to-r from-violet-400 to-cyan-400 bg-clip-text text-transparent glow-text">
+              <span className="bg-gradient-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent glow-text">
                 machine speed
               </span>
             </motion.h1>
@@ -52,7 +52,7 @@ export default function LandingPage() {
             
             <motion.div variants={fadeIn} className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
               <Link href="/studio">
-                <Button size="lg" className="h-14 px-8 text-lg bg-primary hover:bg-primary/90 text-white rounded-full group w-full sm:w-auto">
+                <Button size="lg" className="h-14 px-8 text-lg bg-primary hover:bg-primary/90 text-primary-foreground rounded-full group w-full sm:w-auto font-semibold shadow-xl shadow-amber-500/20">
                   Start creating for free
                   <ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
                 </Button>
@@ -70,7 +70,7 @@ export default function LandingPage() {
             transition={{ duration: 0.8, delay: 0.4 }}
             className="mt-20 relative mx-auto max-w-5xl"
           >
-            <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0f] via-transparent to-transparent z-10" />
+            <div className="absolute inset-0 bg-gradient-to-t from-[#080b10] via-transparent to-transparent z-10" />
             <div className="glass-panel rounded-2xl overflow-hidden border border-white/10 shadow-2xl p-2 bg-black/40">
               <img 
                 src={heroStudioImage} 
@@ -90,7 +90,7 @@ export default function LandingPage() {
         <div className="container mx-auto px-4">
           <p className="text-center text-sm font-medium text-zinc-500 mb-8 uppercase tracking-widest">Powered by industry-leading AI models</p>
           <div className="flex flex-wrap justify-center gap-8 md:gap-16 opacity-50 grayscale hover:grayscale-0 transition-all duration-500">
-            {["OpenAI", "Anthropic", "Google Gemini", "Groq", "ElevenLabs", "Pexels"].map((logo) => (
+            {["OpenAI", "Anthropic", "Google Gemini", "Groq", "ElevenLabs", "Mixkit"].map((logo) => (
               <div key={logo} className="text-xl md:text-2xl font-heading font-bold text-white tracking-tight flex items-center">
                 {logo}
               </div>
@@ -117,7 +117,7 @@ export default function LandingPage() {
               {
                 icon: Video,
                 title: "Cinematic B-Roll",
-                description: "Automatically match script context to premium 4K stock footage. Our semantic search finds exactly what you mean, not just what you say."
+                description: "Automatically match script context to premium 4K stock footage and Mixkit library. Semantic search finds exactly what you mean."
               },
               {
                 icon: Layout,
@@ -125,8 +125,8 @@ export default function LandingPage() {
                 description: "Export instantly to 9:16 Shorts, 16:9 YouTube, or 1:1 Social formats. Intelligent auto-framing keeps subjects centered."
               }
             ].map((feature, i) => (
-              <div key={i} className="glass-panel p-8 rounded-2xl border border-white/10 hover:border-primary/50 transition-colors group">
-                <div className="w-12 h-12 rounded-lg bg-primary/20 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+              <div key={i} className="glass-panel p-8 rounded-2xl border border-white/8 hover:border-primary/40 transition-colors group">
+                <div className="w-12 h-12 rounded-lg bg-primary/15 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
                   <feature.icon className="w-6 h-6 text-primary" />
                 </div>
                 <h3 className="text-xl font-heading font-bold mb-3 text-white">{feature.title}</h3>
@@ -153,13 +153,13 @@ export default function LandingPage() {
                   step: "01",
                   title: "Define your vision",
                   desc: "Enter a topic, niche, and select your visual style. Our AI orchestrator takes over, generating a compelling script optimized for retention.",
-                  color: "from-violet-500 to-purple-500"
+                  color: "from-amber-500 to-orange-500"
                 },
                 {
                   step: "02",
                   title: "Review and refine",
-                  desc: "The Studio generates scenes, sources B-roll, and creates ultra-realistic voiceovers. Tweak anything in our powerful node-based editor.",
-                  color: "from-cyan-500 to-blue-500"
+                  desc: "The Studio generates scenes, sources B-roll from Mixkit, and creates ultra-realistic voiceovers. Tweak anything in our powerful editor.",
+                  color: "from-sky-500 to-blue-500"
                 },
                 {
                   step: "03",
@@ -169,10 +169,10 @@ export default function LandingPage() {
                 }
               ].map((item, i) => (
                 <div key={i} className="relative flex flex-col md:flex-row gap-8 items-start">
-                  <div className={`w-16 h-16 shrink-0 rounded-2xl bg-gradient-to-br ${item.color} flex items-center justify-center text-2xl font-bold font-heading shadow-lg shadow-current/20 z-10`}>
+                  <div className={`w-16 h-16 shrink-0 rounded-2xl bg-gradient-to-br ${item.color} flex items-center justify-center text-2xl font-bold font-heading shadow-lg z-10`}>
                     {item.step}
                   </div>
-                  <div className="glass-panel flex-1 p-8 rounded-2xl border border-white/10">
+                  <div className="glass-panel flex-1 p-8 rounded-2xl border border-white/8">
                     <h3 className="text-2xl font-heading font-bold mb-4">{item.title}</h3>
                     <p className="text-zinc-400 text-lg leading-relaxed">{item.desc}</p>
                   </div>
@@ -185,7 +185,7 @@ export default function LandingPage() {
 
       {/* CTA */}
       <section className="py-32 relative overflow-hidden">
-        <div className="absolute inset-0 bg-primary/10 blur-[100px] rounded-full max-w-3xl mx-auto -z-10" />
+        <div className="absolute inset-0 bg-amber-500/8 blur-[100px] rounded-full max-w-3xl mx-auto -z-10" />
         <div className="container mx-auto px-4 text-center">
           <h2 className="text-4xl md:text-6xl font-heading font-bold mb-8">Ready to scale your production?</h2>
           <p className="text-xl text-zinc-400 mb-10 max-w-2xl mx-auto">Join the creators and teams using AI Video Factory to produce months of content in a single afternoon.</p>

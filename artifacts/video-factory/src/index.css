@@ -50,46 +50,46 @@
 }
 
 :root {
-  --background: 240 10% 4%;
-  --foreground: 0 0% 98%;
+  --background: 220 13% 4%;
+  --foreground: 0 0% 96%;
 
-  --card: 240 10% 6%;
-  --card-foreground: 0 0% 98%;
-  --card-border: 240 10% 12%;
+  --card: 220 13% 6%;
+  --card-foreground: 0 0% 96%;
+  --card-border: 220 13% 12%;
 
-  --popover: 240 10% 6%;
-  --popover-foreground: 0 0% 98%;
-  --popover-border: 240 10% 12%;
+  --popover: 220 13% 6%;
+  --popover-foreground: 0 0% 96%;
+  --popover-border: 220 13% 12%;
 
-  --primary: 262 80% 50%;
-  --primary-foreground: 0 0% 100%;
+  --primary: 38 95% 52%;
+  --primary-foreground: 20 8% 8%;
 
-  --secondary: 240 10% 10%;
-  --secondary-foreground: 0 0% 98%;
+  --secondary: 220 13% 10%;
+  --secondary-foreground: 0 0% 96%;
 
-  --muted: 240 10% 10%;
-  --muted-foreground: 240 5% 65%;
+  --muted: 220 13% 10%;
+  --muted-foreground: 220 8% 60%;
 
-  --accent: 190 90% 45%;
+  --accent: 210 90% 58%;
   --accent-foreground: 0 0% 98%;
 
   --destructive: 0 62.8% 30.6%;
   --destructive-foreground: 0 0% 98%;
 
-  --border: 240 10% 15%;
-  --input: 240 10% 15%;
-  --ring: 262 80% 50%;
+  --border: 220 13% 14%;
+  --input: 220 13% 14%;
+  --ring: 38 95% 52%;
 
   --radius: 0.75rem;
 
-  --sidebar: 240 10% 6%;
-  --sidebar-foreground: 0 0% 98%;
-  --sidebar-border: 240 10% 12%;
-  --sidebar-primary: 262 80% 50%;
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 240 10% 12%;
-  --sidebar-accent-foreground: 0 0% 98%;
-  --sidebar-ring: 262 80% 50%;
+  --sidebar: 220 13% 6%;
+  --sidebar-foreground: 0 0% 96%;
+  --sidebar-border: 220 13% 12%;
+  --sidebar-primary: 38 95% 52%;
+  --sidebar-primary-foreground: 20 8% 8%;
+  --sidebar-accent: 220 13% 12%;
+  --sidebar-accent-foreground: 0 0% 96%;
+  --sidebar-ring: 38 95% 52%;
 
   /* Dark mode is default */
   color-scheme: dark;
@@ -109,14 +109,14 @@
 }
 
 .glass-panel {
-  background: rgba(15, 15, 20, 0.6);
+  background: rgba(12, 14, 20, 0.6);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .glow-text {
-  text-shadow: 0 0 20px rgba(139, 92, 246, 0.5);
+  text-shadow: 0 0 24px rgba(245, 158, 11, 0.45);
 }
 
 .bg-gradient-radial {

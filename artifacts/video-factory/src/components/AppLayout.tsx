@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Video, Sparkles, Zap, LayoutDashboard, LayoutList, Settings } from "lucide-react";
+import { Video, Clapperboard, Zap, LayoutDashboard, LayoutList, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface AppLayoutProps {
@@ -19,12 +19,12 @@ export function AppLayout({ children }: AppLayoutProps) {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="sticky top-0 z-50 w-full border-b border-white/10 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
+      <header className="sticky top-0 z-50 w-full border-b border-white/8 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
         <div className="container mx-auto px-4 flex h-16 items-center justify-between">
           <div className="flex items-center gap-8">
-            <Link href="/" className="flex items-center gap-2 transition-opacity hover:opacity-80">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-600 to-cyan-400 flex items-center justify-center">
-                <Sparkles className="w-5 h-5 text-white" />
+            <Link href="/" className="flex items-center gap-2.5 transition-opacity hover:opacity-80">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/20">
+                <Clapperboard className="w-4 h-4 text-white" />
               </div>
               <span className="font-heading font-bold text-xl tracking-tight">AI Video Factory</span>
             </Link>
@@ -48,7 +48,7 @@ export function AppLayout({ children }: AppLayoutProps) {
           </div>
           <div className="flex items-center gap-4">
             <Link href="/studio/new">
-              <Button className="bg-primary hover:bg-primary/90 text-white border-0">
+              <Button className="bg-primary hover:bg-primary/90 text-primary-foreground border-0 shadow-lg shadow-primary/20 font-semibold">
                 <Zap className="w-4 h-4 mr-2" />
                 New Video
               </Button>
@@ -56,7 +56,7 @@ export function AppLayout({ children }: AppLayoutProps) {
           </div>
         </div>
       </header>
-      <main className="flex-1 w-full bg-[#0a0a0f]">{children}</main>
+      <main className="flex-1 w-full bg-[#080b10]">{children}</main>
     </div>
   );
 }

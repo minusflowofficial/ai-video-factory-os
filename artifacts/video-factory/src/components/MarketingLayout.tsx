@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Sparkles, Menu } from "lucide-react";
+import { Clapperboard } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface MarketingLayoutProps {
@@ -18,12 +18,12 @@ export function MarketingLayout({ children }: MarketingLayoutProps) {
   ];
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#0a0a0f] selection:bg-primary/30">
-      <header className="sticky top-0 z-50 w-full border-b border-white/5 bg-[#0a0a0f]/80 backdrop-blur-xl supports-[backdrop-filter]:bg-[#0a0a0f]/60">
+    <div className="min-h-screen flex flex-col bg-[#080b10] selection:bg-primary/30">
+      <header className="sticky top-0 z-50 w-full border-b border-white/5 bg-[#080b10]/80 backdrop-blur-xl supports-[backdrop-filter]:bg-[#080b10]/60">
         <div className="container mx-auto px-4 flex h-16 items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 transition-opacity hover:opacity-80">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-600 to-cyan-400 flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-white" />
+          <Link href="/" className="flex items-center gap-2.5 transition-opacity hover:opacity-80">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/20">
+              <Clapperboard className="w-4 h-4 text-white" />
             </div>
             <span className="font-heading font-bold text-xl tracking-tight">AI Video Factory</span>
           </Link>
@@ -48,7 +48,7 @@ export function MarketingLayout({ children }: MarketingLayoutProps) {
               Log in
             </Link>
             <Link href="/studio">
-              <Button className="bg-primary hover:bg-primary/90 text-white rounded-full px-6">
+              <Button className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-full px-6 font-semibold shadow-lg shadow-primary/20">
                 Get Started
               </Button>
             </Link>
@@ -62,9 +62,9 @@ export function MarketingLayout({ children }: MarketingLayoutProps) {
         <div className="container mx-auto px-4">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-12">
             <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-md bg-gradient-to-br from-violet-600 to-cyan-400 flex items-center justify-center">
-                  <Sparkles className="w-3 h-3 text-white" />
+              <div className="flex items-center gap-2.5">
+                <div className="w-6 h-6 rounded-md bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">
+                  <Clapperboard className="w-3 h-3 text-white" />
                 </div>
                 <span className="font-heading font-bold text-lg tracking-tight">AI Video Factory</span>
               </div>

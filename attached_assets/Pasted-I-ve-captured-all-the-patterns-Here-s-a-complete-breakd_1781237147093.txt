@@ -1,0 +1,79 @@
+I've captured all the patterns. Here's a complete breakdown of Mixkit's CDN and URL endpoint structure — no undocumented private API, just a clean CDN pattern system:
+
+Mixkit URL/Endpoint Patterns
+⚠️ Important: Mixkit content is free under their license↗, but hotlinking their CDN directly in production apps may violate their Terms of Service. Always download assets and serve them yourself, or attribute properly. Review their ToS before shipping.
+
+🎥 Videos
+CDN Base: https://assets.mixkit.co↗
+What
+URL Pattern
+Preview MP4 (360p)
+https://assets.mixkit.co/videos/{id}/{id}-360.mp4↗
+Thumbnail (JPG)
+https://assets.mixkit.co/videos/{id}/{id}-thumb-360-0.jpg↗
+Newer/Envato items MP4
+https://assets.mixkit.co/active_storage/video_items/{id}/{timestamp}/{...↗
+Newer/Envato items thumb
+https://assets.mixkit.co/active_storage/video_items/{id}/{timestamp}/{...↗
+
+Resized/optimized thumbs via Envato CDN:
+https://mixkit-resized.envatousercontent.com/mixkit/videos/{id}/{id}-thumb-360-0.jpg
+  ?cf_fit=cover&q=85&format=avif&w=460&h=259&s={signature}
+
+The s= param is a signed hash — these URLs are not forgeable, use assets.mixkit.co instead.
+
+🎵 Music (Background Tracks)
+What
+URL Pattern
+MP3 Audio file
+https://assets.mixkit.co/music/{id}/{id}.mp3↗
+Waveform data (JSON)
+https://assets.mixkit.co/music/{id}/{id}-waveform.json↗
+
+Examples:
+https://assets.mixkit.co/music/738/738.mp3
+https://assets.mixkit.co/music/738/738-waveform.json
+
+
+🔊 Sound Effects
+What
+URL Pattern
+Preview MP3
+https://assets.mixkit.co/active_storage/sfx/{id}/{id}-preview.mp3↗
+
+Examples:
+https://assets.mixkit.co/active_storage/sfx/213/213-preview.mp3
+https://assets.mixkit.co/active_storage/sfx/1714/1714-preview.mp3
+
+
+🔍 Browse / Search Pages (for scraping listings)
+Mixkit is server-side rendered — there's no JSON API for search. You browse HTML pages:
+Page
+URL
+All videos
+https://mixkit.co/free-stock-video/↗
+Videos by keyword
+https://mixkit.co/free-stock-video/discover/{keyword}/↗
+Videos by resolution
+https://mixkit.co/free-stock-video/discover/?resolution=4k↗
+Vertical videos
+https://mixkit.co/free-vertical-videos/↗
+Videos by category
+https://mixkit.co/free-stock-video/{category}/↗ (e.g. nature/, food/)
+All music
+https://mixkit.co/free-stock-music/↗
+All sound effects
+https://mixkit.co/free-sound-effects/↗
+Search (all types)
+https://mixkit.co/search/↗
+
+
+💡 How to Use This in Your Vibe Coding Project
+For your keyword-search website, the approach is:
+Search/browse the HTML listing pages (e.g. /free-stock-video/discover/{keyword}/) using requests + BeautifulSoup
+Parse the data- attributes and embedded JSON in <script> tags to get asset IDs
+Construct the CDN URLs using the patterns above: assets.mixkit.co/videos/{id}/{id}-360.mp4
+Download the assets to your own server (don't hotlink directly)
+The {id} is just a plain integer — older content uses /videos/{id}/, newer Envato-sourced content uses /active_storage/video_items/{id}/{timestamp}/.
+Would you like me to build a Notte Function that takes a keyword and returns a list of matching video/audio/SFX assets with their CDN URLs?
+

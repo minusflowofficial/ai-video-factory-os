@@ -12,7 +12,6 @@ import { Zap, XCircle, ListVideo, Search, Clock } from "lucide-react";
 
 export default function BulkFactory() {
   const queryClient = useQueryClient();
-  // We'll set refetchInterval to simulate the auto-refresh
   const { data: jobs = [], isLoading } = useListBulkJobs(undefined, { 
     query: { refetchInterval: 5000 } 
   });
@@ -42,7 +41,7 @@ export default function BulkFactory() {
     }, {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListBulkJobsQueryKey() });
-        setFormData(prev => ({...prev, niche: "", goal: ""})); // reset text inputs
+        setFormData(prev => ({...prev, niche: "", goal: ""}));
       }
     });
   };
@@ -61,7 +60,7 @@ export default function BulkFactory() {
         <div className="mb-8 flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-heading font-bold text-white flex items-center gap-3">
-              <ListVideo className="w-8 h-8 text-cyan-400" />
+              <ListVideo className="w-8 h-8 text-amber-400" />
               Bulk Factory
             </h1>
             <p className="text-zinc-400 mt-2">Generate dozens of videos asynchronously.</p>
@@ -73,7 +72,7 @@ export default function BulkFactory() {
           <h2 className="text-lg font-heading font-bold text-white mb-4">Start New Batch</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="lg:col-span-2 space-y-2">
-              <label className="text-xs font-medium text-zinc-400 uppercase">Niche / Topic</label>
+              <label className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Niche / Topic</label>
               <Input 
                 value={formData.niche}
                 onChange={e => setFormData({...formData, niche: e.target.value})}
@@ -82,12 +81,12 @@ export default function BulkFactory() {
               />
             </div>
             <div className="lg:col-span-1 space-y-2">
-              <label className="text-xs font-medium text-zinc-400 uppercase">Quantity</label>
+              <label className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Quantity</label>
               <Select value={formData.totalVideos} onValueChange={v => setFormData({...formData, totalVideos: v})}>
                 <SelectTrigger className="bg-black/50 border-white/10 text-white">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-[#0a0a0f] border-white/10">
+                <SelectContent className="bg-[#080b10] border-white/10">
                   <SelectItem value="10">10 Videos</SelectItem>
                   <SelectItem value="50">50 Videos</SelectItem>
                   <SelectItem value="100">100 Videos</SelectItem>
@@ -97,12 +96,12 @@ export default function BulkFactory() {
               </Select>
             </div>
             <div className="lg:col-span-1 space-y-2">
-              <label className="text-xs font-medium text-zinc-400 uppercase">Format</label>
+              <label className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Format</label>
               <Select value={formData.aspectRatio} onValueChange={v => setFormData({...formData, aspectRatio: v})}>
                 <SelectTrigger className="bg-black/50 border-white/10 text-white">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-[#0a0a0f] border-white/10">
+                <SelectContent className="bg-[#080b10] border-white/10">
                   <SelectItem value="9:16">9:16 Shorts</SelectItem>
                   <SelectItem value="16:9">16:9 Landscape</SelectItem>
                   <SelectItem value="1:1">1:1 Square</SelectItem>
@@ -113,7 +112,7 @@ export default function BulkFactory() {
               <Button 
                 onClick={handleSubmit}
                 disabled={!formData.niche || createJob.isPending}
-                className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold"
+                className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-bold shadow-lg shadow-primary/20"
               >
                 <Zap className="w-4 h-4 mr-2" />
                 Queue Job
@@ -133,7 +132,7 @@ export default function BulkFactory() {
           ) : jobs.length === 0 ? (
             <div className="text-center py-16 bg-black/20 rounded-xl border border-white/5 border-dashed">
               <Search className="w-10 h-10 text-zinc-600 mx-auto mb-3" />
-              <p className="text-zinc-400">No active or past bulk jobs.</p>
+              <p className="text-zinc-400">No active or past bulk jobs. Queue your first batch above.</p>
             </div>
           ) : (
             <div className="space-y-4">
