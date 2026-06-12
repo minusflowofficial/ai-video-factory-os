@@ -1,0 +1,2 @@
+# Netscape HTTP Cookie File
+.youtube.com	TRUE	/	TRUE	9999999999	SAPS_ENABLED	1
