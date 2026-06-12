@@ -334,18 +334,18 @@ async function buildFfmpegArgs(
   // For 9:16 and 1:1: scale landscape to fill the HEIGHT, then center-crop the width
   // For 16:9: scale to fit width, letterbox if needed
   function clipScaleFilter(i: number): string {
+    // fps=30 MUST come after trim+setpts — xfade requires constant frame rate
+    // and setpts=PTS-STARTPTS resets the timebase (making it 1/0 if fps not re-applied)
     if (AR === "9:16" || AR === "1:1") {
-      // scale to fill height → width may exceed target → crop center
       return (
         `[${i}:v]scale=-2:${H},crop=${W}:${H}:(iw-${W})/2:0,` +
-        `setsar=1,fps=24,trim=0:${clipDur},setpts=PTS-STARTPTS`
+        `setsar=1,trim=0:${clipDur},setpts=PTS-STARTPTS,fps=30`
       );
     }
-    // 16:9 default: fit with black bars if needed
     return (
       `[${i}:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
-      `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24,` +
-      `trim=0:${clipDur},setpts=PTS-STARTPTS`
+      `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1,` +
+      `trim=0:${clipDur},setpts=PTS-STARTPTS,fps=30`
     );
   }
 
