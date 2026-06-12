@@ -1,0 +1,106 @@
+Build a YouTube Transcript Generator web app using the NoteGPT API (no backend needed, 
+direct API calls from frontend).
+
+## Core Features
+1. User pastes a YouTube URL or video ID
+2. App fetches transcript with timestamps
+3. Transcript is displayed in a clean, readable format
+4. Copy / Download (TXT) buttons
+5. Language selector (based on available languages from API)
+
+---
+
+## API Integration (IMPORTANT — use exactly as described)
+
+### Step 1: Get session cookie
+Before every transcript request, call this endpoint to get a fresh session token:
+
+GET https://notegpt.io/user/v2/userinfo
+Headers: { "User-Agent": "Mozilla/5.0" }
+
+Extract the `sbox-guid` value from the `set-cookie` response header.
+Also generate a random UUID client-side for `anonymous_user_id`.
+
+### Step 2: Fetch transcript
+GET https://notegpt.io/api/v2/video-transcript
+Query params: { platform: "youtube", video_id: "<VIDEO_ID>" }
+Headers: { "User-Agent": "Mozilla/5.0" }
+Cookies: sbox-guid=<value from step 1>; anonymous_user_id=<random UUID>
+
+### Response shape:
+{
+  "code": 100000,
+  "message": "success",
+  "data": {
+    "videoId": "...",
+    "videoInfo": {
+      "name": "Video Title",
+      "author": "Channel Name",
+      "duration": "213",
+      "thumbnailUrl": { "hqdefault": "...", "maxresdefault": "..." }
+    },
+    "language_code": [{ "code": "en", "name": "English" }],
+    "transcripts": {
+      "en": {
+        "custom": [
+          { "start": "00:00:01", "end": "00:00:49", "text": "..." },
+          ...
+        ]
+      }
+    }
+  }
+}
+
+### Extract video ID from URL:
+- youtube.com/watch?v=VIDEO_ID  → parse "v" param
+- youtu.be/VIDEO_ID              → path segment
+- Raw ID like "dQw4w9WgXcQ"     → use as-is
+
+---
+
+## UI Layout
+
+### Header
+- App name: "YouTube Transcript Generator"
+- Minimal, clean design
+
+### Input Section
+- Large text input: "Paste YouTube URL or video ID"
+- Language dropdown (populated after first fetch, default: English)
+- "Generate Transcript" button (primary CTA)
+
+### Video Info Card (shown after fetch)
+- Thumbnail (hqdefault)
+- Title + Author
+- Duration (format seconds → MM:SS)
+
+### Transcript Panel
+- Each segment on a new row:
+  [00:00:01] Text of the segment here...
+- Timestamps in a muted color, text in normal weight
+- Scrollable container with max height
+- "Copy All" button — copies plain text without timestamps
+- "Copy with Timestamps" button
+- "Download TXT" button — filename: <video_title>_transcript.txt
+
+### Loading & Error States
+- Spinner while fetching
+- Error banner if API returns non-100000 code or network fails
+- "No transcript available" state if transcript array is empty
+
+---
+
+## Tech Stack
+- React + TypeScript
+- Tailwind CSS
+- No backend / no database needed
+- All API calls from the browser (fetch API)
+
+---
+
+## Notes
+- The API is free & requires no API key — only the anonymous cookies described above
+- sbox-guid must be freshly fetched before each transcript request (don't cache it)
+- anonymous_user_id can be any valid UUID, generated once per session via crypto.randomUUID()
+- If the user enters only a video ID (no URL), use it directly as video_id
+

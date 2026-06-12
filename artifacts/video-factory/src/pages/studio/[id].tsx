@@ -96,6 +96,7 @@ export default function StudioEditor() {
 
   const { data: project, isLoading } = useGetProject(id, {
     query: {
+      queryKey: getGetProjectQueryKey(id),
       enabled: !!id,
       refetchInterval: (query) => {
         const s = (query.state.data as any)?.status as string | undefined;

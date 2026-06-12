@@ -12,7 +12,7 @@ import { Zap, XCircle, Film } from "lucide-react";
 
 export default function BulkFactory() {
   const queryClient = useQueryClient();
-  const { data: jobs = [], isLoading } = useListBulkJobs(undefined, { query: { refetchInterval: 5000 } });
+  const { data: jobs = [], isLoading } = useListBulkJobs({ query: { queryKey: ["bulk-jobs"], refetchInterval: 5000 } });
   const createJob = useCreateBulkJob();
   const cancelJob = useCancelBulkJob();
 

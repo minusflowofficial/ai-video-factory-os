@@ -473,7 +473,7 @@ async function buildFfmpegArgs(
   for (const p of clipPaths) {
     inputArgs.push("-stream_loop", "-1", "-i", p);
   }
-  inputArgs.push("-i", musicPath);
+  inputArgs.push("-stream_loop", "-1", "-i", musicPath);
   if (sfxPath) inputArgs.push("-i", sfxPath);
 
   return [

@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Clapperboard, LayoutDashboard, FolderOpen, ListVideo, Settings, Plus } from "lucide-react";
+import { Clapperboard, LayoutDashboard, FolderOpen, ListVideo, Settings, Plus, Scissors } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface AppLayoutProps {
@@ -11,6 +11,7 @@ const NAV = [
   { name: "Studio",       href: "/studio",   icon: LayoutDashboard },
   { name: "Projects",     href: "/projects", icon: FolderOpen },
   { name: "Bulk Factory", href: "/bulk",      icon: ListVideo },
+  { name: "Clipper",      href: "/clipper",  icon: Scissors },
   { name: "Settings",     href: "/settings", icon: Settings },
 ];
 

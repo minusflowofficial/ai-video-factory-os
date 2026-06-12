@@ -6,6 +6,7 @@ import settingsRouter from "./settings";
 import statsRouter    from "./stats";
 import proxyRouter    from "./proxy";
 import ttsRouter      from "./tts";
+import clipperRouter  from "./clipper";
 
 const router: IRouter = Router();
 
@@ -16,5 +17,6 @@ router.use(bulkJobsRouter);
 router.use(settingsRouter);
 router.use(statsRouter);
 router.use(ttsRouter);
+router.use(clipperRouter);
 
 export default router;

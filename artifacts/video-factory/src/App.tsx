@@ -20,6 +20,7 @@ import StudioEditor from "@/pages/studio/[id]";
 import BulkFactory from "@/pages/bulk/index";
 import ProjectsHistory from "@/pages/projects/index";
 import SettingsPage from "@/pages/settings/index";
+import ClipperPage from "@/pages/clipper/index";
 
 const queryClient = new QueryClient();
 
@@ -44,6 +45,7 @@ function Router() {
       <Route path="/bulk" component={BulkFactory} />
       <Route path="/projects" component={ProjectsHistory} />
       <Route path="/settings" component={SettingsPage} />
+      <Route path="/clipper" component={ClipperPage} />
 
       <Route component={NotFound} />
     </Switch>

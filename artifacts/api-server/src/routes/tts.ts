@@ -1,161 +1,148 @@
 /**
- * TTS (Text-to-Speech) voiceover generation using Supertone Supertonic.
+ * TTS (Text-to-Speech) voiceover generation using free Microsoft Edge TTS.
  *
- * Setup:
- *   1. Get API key from https://supertone.ai
- *   2. Set SUPERTONE_API_KEY in your environment secrets
- *   3. Install: pnpm --filter @workspace/api-server add supertonic
+ * API:
+ *   GET  /api/tts/voices              — list available voices
+ *   POST /api/projects/:id/generate-tts — generate voiceover for project
+ *   GET  /api/projects/:id/tts-status  — check if voiceover.mp3 exists
  *
- * API: POST /api/projects/:id/generate-tts
- *   Body: { voiceId?: string, speed?: number }
- *   Returns: project with status="voiceover"
- *   Generates: /tmp/render-{id}/voiceover.mp3 (used in render mix)
- *
- * Voice rendering: the render pipeline automatically uses voiceover.mp3
- * if it exists (voiceover at 100% + background music at 15%).
+ * Generated audio: /tmp/render-{id}/voiceover.mp3
+ * Render pipeline mixes it as narration + music at 15% volume.
  */
 
 import { Router, type IRouter } from "express";
 import { eq } from "drizzle-orm";
 import * as fs from "fs";
 import * as path from "path";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import { db, projectsTable } from "@workspace/db";
 
+const execFileAsync = promisify(execFile);
 const router: IRouter = Router();
 
-// Default voices per gender (Supertone voice IDs)
-const VOICE_MAP: Record<string, string> = {
-  female:    "aria",
-  male:      "james",
-  "female-warm":  "luna",
-  "male-deep":    "atlas",
-};
+const EDGE_TTS = process.env.EDGE_TTS_PATH ?? "/home/runner/workspace/.pythonlibs/bin/edge-tts";
 
-router.post("/projects/:id/generate-tts", async (req, res): Promise<void> => {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+export const TTS_VOICES = [
+  { id: "en-US-AriaNeural",          name: "Aria",        gender: "female", style: "Natural",      flag: "🇺🇸" },
+  { id: "en-US-JennyNeural",         name: "Jenny",       gender: "female", style: "Professional", flag: "🇺🇸" },
+  { id: "en-US-AvaNeural",           name: "Ava",         gender: "female", style: "Warm",         flag: "🇺🇸" },
+  { id: "en-US-EmmaNeural",          name: "Emma",        gender: "female", style: "Cheerful",     flag: "🇺🇸" },
+  { id: "en-US-MichelleNeural",      name: "Michelle",    gender: "female", style: "Energetic",    flag: "🇺🇸" },
+  { id: "en-US-GuyNeural",           name: "Guy",         gender: "male",   style: "Natural",      flag: "🇺🇸" },
+  { id: "en-US-EricNeural",          name: "Eric",        gender: "male",   style: "Professional", flag: "🇺🇸" },
+  { id: "en-US-ChristopherNeural",   name: "Christopher", gender: "male",   style: "Deep",         flag: "🇺🇸" },
+  { id: "en-US-BrianNeural",         name: "Brian",       gender: "male",   style: "Warm",         flag: "🇺🇸" },
+  { id: "en-GB-SoniaNeural",         name: "Sonia",       gender: "female", style: "British",      flag: "🇬🇧" },
+  { id: "en-GB-RyanNeural",          name: "Ryan",        gender: "male",   style: "British",      flag: "🇬🇧" },
+  { id: "en-AU-NatashaNeural",       name: "Natasha",     gender: "female", style: "Australian",   flag: "🇦🇺" },
+  { id: "en-IN-NeerjaNeural",        name: "Neerja",      gender: "female", style: "Indian",       flag: "🇮🇳" },
+];
 
-  const apiKey = process.env.SUPERTONE_API_KEY;
-  if (!apiKey) {
-    res.status(402).json({
-      error: "SUPERTONE_API_KEY not configured.",
-      hint: "Add SUPERTONE_API_KEY to your environment secrets to enable AI voiceovers.",
-      setupUrl: "https://supertone.ai",
-    });
-    return;
-  }
-
-  const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, id));
-  if (!project) { res.status(404).json({ error: "Not found" }); return; }
-
-  const text = project.script ?? project.hook ?? project.title;
-  if (!text?.trim()) { res.status(400).json({ error: "No script to synthesize. Generate a script first." }); return; }
-
-  // Respond immediately, process in background
-  const [updated] = await db.update(projectsTable).set({
-    status: "voiceover",
-    updatedAt: new Date(),
-  }).where(eq(projectsTable.id, id)).returning();
-
-  res.json(serializeTtsProject(updated));
-
-  // Background: call Supertone API
-  const voiceId  = (req.body?.voiceId as string) ?? VOICE_MAP[project.voiceGender ?? "female"] ?? "aria";
-  const speed    = typeof req.body?.speed === "number" ? req.body.speed : 1.0;
-  const language = project.voiceLanguage ?? "en-US";
-
-  generateVoiceover(id, text, voiceId, language, speed, apiKey).catch(() => {});
+/** List available Edge TTS voices */
+router.get("/tts/voices", async (_req, res): Promise<void> => {
+  res.json({ voices: TTS_VOICES, provider: "Microsoft Edge TTS (free, no API key needed)" });
 });
 
-async function generateVoiceover(
-  id: number,
-  text: string,
-  voiceId: string,
-  language: string,
-  speed: number,
-  apiKey: string,
-): Promise<void> {
-  const dir = `/tmp/render-${id}`;
-  await fs.promises.mkdir(dir, { recursive: true });
-
-  try {
-    /**
-     * Supertone API reference: https://supertone.ai/docs
-     * Adjust endpoint/payload once you have API access.
-     */
-    const response = await fetch("https://supertone.ai/api/v1/tts", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type":  "application/json",
-        Accept: "audio/mpeg",
-      },
-      body: JSON.stringify({
-        text,
-        voice_id:  voiceId,
-        language,
-        speed,
-        format:    "mp3",
-        sample_rate: 44100,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Supertone API ${response.status}: ${await response.text()}`);
-    }
-
-    const buf = await response.arrayBuffer();
-    await fs.promises.writeFile(path.join(dir, "voiceover.mp3"), Buffer.from(buf));
-
-    // Flag that voiceover is ready (render pipeline picks it up automatically)
-    await db.update(projectsTable).set({
-      status: "scripting",   // back to ready state
-      voiceoverUrl: null,    // null = use voiceover.mp3 file instead of music
-      updatedAt: new Date(),
-    }).where(eq(projectsTable.id, id));
-
-  } catch (err: any) {
-    // Mark as error so the UI can show a message
-    await db.update(projectsTable).set({
-      status: "scripting",
-      updatedAt: new Date(),
-    }).where(eq(projectsTable.id, id));
-  }
-}
-
-/** Check if a voiceover file exists for a project */
+/** Check if voiceover file exists for a project */
 router.get("/projects/:id/tts-status", async (req, res): Promise<void> => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   const voicePath = `/tmp/render-${id}/voiceover.mp3`;
   const exists = await fs.promises.access(voicePath).then(() => true).catch(() => false);
-  const hasKey = !!process.env.SUPERTONE_API_KEY;
-  res.json({ hasVoiceover: exists, apiKeyConfigured: hasKey });
+  let durationSecs = 0;
+  if (exists) {
+    try {
+      const { stdout } = await execFileAsync("ffprobe", [
+        "-v", "quiet", "-print_format", "json", "-show_format", voicePath,
+      ]);
+      durationSecs = parseFloat(JSON.parse(stdout).format?.duration ?? "0");
+    } catch { /* ignore */ }
+  }
+  res.json({ hasVoiceover: exists, durationSecs });
 });
 
-/** List available voices */
-router.get("/tts/voices", async (_req, res): Promise<void> => {
-  const hasKey = !!process.env.SUPERTONE_API_KEY;
-  res.json({
-    apiKeyConfigured: hasKey,
-    voices: [
-      { id: "aria",  name: "Aria",  gender: "female", language: "en-US", style: "Professional" },
-      { id: "luna",  name: "Luna",  gender: "female", language: "en-US", style: "Warm" },
-      { id: "james", name: "James", gender: "male",   language: "en-US", style: "Professional" },
-      { id: "atlas", name: "Atlas", gender: "male",   language: "en-US", style: "Deep" },
-    ],
-    note: hasKey
-      ? "Supertone API is configured and ready."
-      : "Set SUPERTONE_API_KEY in environment secrets to enable AI voiceovers.",
-  });
+/** Generate voiceover for a project using Edge TTS */
+router.post("/projects/:id/generate-tts", async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, id));
+  if (!project) { res.status(404).json({ error: "Not found" }); return; }
+
+  const text = project.script ?? project.hook ?? project.title;
+  if (!text?.trim()) {
+    res.status(400).json({ error: "No script to synthesize. Generate a script first." });
+    return;
+  }
+
+  const voiceId  = (req.body?.voiceId  as string) ?? "en-US-AriaNeural";
+  const rate     = (req.body?.rate     as string) ?? "+0%";
+  const pitch    = (req.body?.pitch    as string) ?? "+0Hz";
+
+  // Update status immediately, then generate in background
+  await db.update(projectsTable).set({ status: "voiceover", updatedAt: new Date() })
+    .where(eq(projectsTable.id, id));
+
+  res.json({ id, status: "voiceover", voice: voiceId, message: "Generating voiceover…" });
+
+  generateEdgeTTS(id, text, voiceId, rate, pitch).catch(() => {});
 });
 
-function serializeTtsProject(p: typeof projectsTable.$inferSelect) {
-  return {
-    id: p.id, title: p.title, status: p.status,
-    voiceGender: p.voiceGender, voiceLanguage: p.voiceLanguage,
-    updatedAt: p.updatedAt?.toISOString() ?? null,
-  };
+async function generateEdgeTTS(
+  id: number,
+  text: string,
+  voiceId: string,
+  rate: string,
+  pitch: string,
+): Promise<void> {
+  const dir = `/tmp/render-${id}`;
+  await fs.promises.mkdir(dir, { recursive: true });
+  const outputPath = path.join(dir, "voiceover.mp3");
+
+  try {
+    await execFileAsync(EDGE_TTS, [
+      "--voice", voiceId,
+      "--rate",  rate,
+      "--pitch", pitch,
+      "--text",  text,
+      "--write-media", outputPath,
+    ], { timeout: 120_000 });
+
+    await db.update(projectsTable)
+      .set({ status: "scripting", updatedAt: new Date() })
+      .where(eq(projectsTable.id, id));
+
+  } catch (err) {
+    console.error(`[tts-${id}] Edge TTS failed:`, err);
+    await db.update(projectsTable)
+      .set({ status: "scripting", updatedAt: new Date() })
+      .where(eq(projectsTable.id, id));
+  }
 }
+
+/** Preview: generate TTS for arbitrary text (no project needed) */
+router.post("/tts/preview", async (req, res): Promise<void> => {
+  const { text, voiceId = "en-US-AriaNeural", rate = "+0%", pitch = "+0Hz" } = req.body ?? {};
+  if (!text?.trim()) { res.status(400).json({ error: "text required" }); return; }
+
+  const tmpFile = `/tmp/tts-preview-${Date.now()}.mp3`;
+  try {
+    await execFileAsync(EDGE_TTS, [
+      "--voice", voiceId, "--rate", rate, "--pitch", pitch,
+      "--text", String(text).slice(0, 500),
+      "--write-media", tmpFile,
+    ], { timeout: 30_000 });
+
+    const stat = await fs.promises.stat(tmpFile);
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Content-Length", stat.size);
+    const stream = fs.createReadStream(tmpFile);
+    stream.pipe(res);
+    stream.on("end", () => fs.promises.unlink(tmpFile).catch(() => {}));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 export default router;
