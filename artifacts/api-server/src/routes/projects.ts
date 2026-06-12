@@ -739,47 +739,46 @@ router.post("/projects/:id/generate-assets", async (req, res): Promise<void> => 
   const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, id));
   if (!project) { res.status(404).json({ error: "Not found" }); return; }
 
-  // Respond immediately with "fetching-assets" so UI shows progress
-  const [interim] = await db.update(projectsTable).set({
-    status: "fetching-assets",
-    updatedAt: new Date(),
-  }).where(eq(projectsTable.id, id)).returning();
-  res.json(serializeProject(interim));
+  // Set status to show progress in UI
+  await db.update(projectsTable).set({ status: "fetching-assets", updatedAt: new Date() })
+    .where(eq(projectsTable.id, id));
 
-  // Run asset search in background — async so response is already sent
-  (async () => {
-    try {
-      const totalSecs = parseDuration(project.duration ?? "60s");
-      const { numClips } = getClipConfig(totalSecs);
+  try {
+    const totalSecs = parseDuration(project.duration ?? "60s");
+    const { numClips } = getClipConfig(totalSecs);
 
-      // Build keyword list from topic, niche, title — most specific first
-      const kws = extractKeywords(project.title, project.topic, project.niche);
-      // Also add raw topic/niche slugs as top-priority search terms
-      const searchTerms = [
-        project.topic ?? "",
-        project.niche ?? "",
-        ...kws,
-      ].map(s => s.trim()).filter(Boolean);
+    const kws = extractKeywords(project.title, project.topic, project.niche);
+    const searchTerms = [
+      project.topic ?? "",
+      project.niche ?? "",
+      ...kws,
+    ].map(s => s.trim()).filter(Boolean);
 
-      // Dynamic search — scrapes Mixkit pages for real keyword-matched clips
-      const ids = await searchMixkitVideos(searchTerms, numClips);
+    const ids = await searchMixkitVideos(searchTerms, numClips);
 
-      const assets = JSON.stringify(ids.map((mixkitId, i) => ({
-        id: i + 1, type: "video", mixkitId,
-        url: mixkitVideoUrl(mixkitId),
-        thumbnail: mixkitThumbUrl(mixkitId),
-        source: "mixkit",
-        keyword: searchTerms[i] ?? searchTerms[0] ?? project.title,
-      })));
+    const assets = JSON.stringify(ids.map((mixkitId, i) => ({
+      id: i + 1, type: "video", mixkitId,
+      url: mixkitVideoUrl(mixkitId),
+      thumbnail: mixkitThumbUrl(mixkitId),
+      source: "mixkit",
+      keyword: searchTerms[i] ?? searchTerms[0] ?? project.title,
+    })));
 
-      await db.update(projectsTable).set({
-        assets,
-        updatedAt: new Date(),
-      }).where(eq(projectsTable.id, id));
-    } catch (err) {
-      console.error(`[generate-assets] project ${id} failed:`, err);
-    }
-  })();
+    const [updated] = await db.update(projectsTable).set({
+      assets,
+      status: "assets-ready",
+      updatedAt: new Date(),
+    }).where(eq(projectsTable.id, id)).returning();
+
+    res.json(serializeProject(updated));
+  } catch (err) {
+    console.error(`[generate-assets] project ${id} failed:`, err);
+    const [updated] = await db.update(projectsTable).set({
+      status: "draft",
+      updatedAt: new Date(),
+    }).where(eq(projectsTable.id, id)).returning();
+    res.status(500).json({ error: "Asset search failed", project: serializeProject(updated) });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -792,33 +791,36 @@ router.post("/projects/:id/generate-voiceover", async (req, res): Promise<void> 
   const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, id));
   if (!project) { res.status(404).json({ error: "Not found" }); return; }
 
-  // Respond immediately
-  const [interim] = await db.update(projectsTable).set({
-    status: "voiceover",
-    updatedAt: new Date(),
-  }).where(eq(projectsTable.id, id)).returning();
-  res.json(serializeProject(interim));
+  // Set status to show progress in UI
+  await db.update(projectsTable).set({ status: "voiceover", updatedAt: new Date() })
+    .where(eq(projectsTable.id, id));
 
-  // Search for matching music in background
-  (async () => {
-    try {
-      const kws = extractKeywords(project.title, project.topic, project.niche);
-      const searchTerms = [
-        project.topic ?? "",
-        project.niche ?? "",
-        ...kws,
-      ].map(s => s.trim()).filter(Boolean);
+  try {
+    const kws = extractKeywords(project.title, project.topic, project.niche);
+    const searchTerms = [
+      project.topic ?? "",
+      project.niche ?? "",
+      ...kws,
+    ].map(s => s.trim()).filter(Boolean);
 
-      const musicUrl = await searchMixkitMusic(searchTerms);
+    // Search Mixkit music by content topic/title keywords
+    const musicUrl = await searchMixkitMusic(searchTerms);
 
-      await db.update(projectsTable).set({
-        voiceoverUrl: musicUrl,
-        updatedAt: new Date(),
-      }).where(eq(projectsTable.id, id));
-    } catch (err) {
-      console.error(`[generate-voiceover] project ${id} failed:`, err);
-    }
-  })();
+    const [updated] = await db.update(projectsTable).set({
+      voiceoverUrl: musicUrl,
+      status: "music-ready",
+      updatedAt: new Date(),
+    }).where(eq(projectsTable.id, id)).returning();
+
+    res.json(serializeProject(updated));
+  } catch (err) {
+    console.error(`[generate-voiceover] project ${id} failed:`, err);
+    const [updated] = await db.update(projectsTable).set({
+      status: "assets-ready",
+      updatedAt: new Date(),
+    }).where(eq(projectsTable.id, id)).returning();
+    res.status(500).json({ error: "Music search failed", project: serializeProject(updated) });
+  }
 });
 
 // ---------------------------------------------------------------------------

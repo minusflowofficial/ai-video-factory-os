@@ -99,7 +99,7 @@ export default function StudioEditor() {
       enabled: !!id,
       refetchInterval: (query) => {
         const s = (query.state.data as any)?.status as string | undefined;
-        return ["rendering", "scripting", "fetching-assets", "voiceover"].includes(s ?? "")
+        return ["rendering", "scripting", "fetching-assets", "voiceover", "assets-ready", "music-ready"].includes(s ?? "")
           ? 1200 : false;
       },
     },
@@ -255,9 +255,10 @@ export default function StudioEditor() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        musicTrackId:     selectedTrack ?? 738,
+        musicTrackId:     selectedTrack ?? undefined,
         showTitle:        renderOpts.showTitle,
         showCaptions:     renderOpts.showCaptions,
+        captionStyle:     renderOpts.captionStyle,
         transitionEffect: renderOpts.transitionEffect,
         addSfx:           renderOpts.addSfx,
       }),
