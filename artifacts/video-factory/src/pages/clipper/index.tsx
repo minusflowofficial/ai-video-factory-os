@@ -59,7 +59,7 @@ const ORDER = ["queued","uploading","downloading","transcribing","analyzing","cr
 
 // ── Main Page ──────────────────────────────────────────────────────────────────
 export default function ClipperPage() {
-  const [tab,          setTab]         = useState<"url" | "upload">("url");
+  const [tab,          setTab]         = useState<"url" | "upload">("upload");
   const [url,          setUrl]         = useState("");
   const [uploadedFile, setUploadedFile] = useState<{path:string; name:string; sizeMb:number} | null>(null);
   const [uploading,    setUploading]   = useState(false);
@@ -217,28 +217,35 @@ export default function ClipperPage() {
             <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
               {/* Tab bar */}
               <div className="flex border-b border-gray-100">
-                {([["url","YouTube URL",Link2],["upload","Upload Video",Upload]] as const).map(([t, label, Icon]) => (
+                {([["upload","Upload Video",Upload],["url","YouTube URL",Link2]] as const).map(([t, label, Icon]) => (
                   <button key={t} onClick={() => setTab(t)}
-                    className={cn("flex-1 flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-colors",
+                    className={cn("flex-1 flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-colors relative",
                       tab === t ? "bg-amber-50 text-amber-800 border-b-2 border-amber-400" : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
                     )}>
                     <Icon className="w-4 h-4" />{label}
+                    {t === "upload" && <span className="text-[9px] font-bold bg-emerald-500 text-white px-1.5 py-0.5 rounded-full ml-1">FAST</span>}
                   </button>
                 ))}
               </div>
 
               <div className="p-5">
                 {tab === "url" ? (
-                  <div className="flex gap-3">
-                    <input value={url} onChange={e => setUrl(e.target.value)}
-                      onKeyDown={e => e.key === "Enter" && canStart && startPipeline()}
-                      placeholder="https://youtube.com/watch?v=... or video ID"
-                      className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-200"
-                    />
-                    <Button onClick={startPipeline} disabled={!canStart}
-                      className="shrink-0 bg-amber-400 hover:bg-amber-500 text-amber-950 font-semibold px-5 h-auto rounded-lg disabled:opacity-40">
-                      {starting || isRunning ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Working…</> : <><Sparkles className="w-4 h-4 mr-2" />Create Clips</>}
-                    </Button>
+                  <div className="space-y-3">
+                    <div className="flex items-start gap-2 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2.5 text-xs text-yellow-800">
+                      <AlertCircle className="w-3.5 h-3.5 text-yellow-500 mt-0.5 shrink-0" />
+                      <span><strong>Cloud server limitation:</strong> YouTube blocks downloads for newer/protected videos from cloud IPs. Works for older videos (pre-2023). For everything else, use <button className="underline font-semibold" onClick={() => setTab("upload")}>Upload Video</button>.</span>
+                    </div>
+                    <div className="flex gap-3">
+                      <input value={url} onChange={e => setUrl(e.target.value)}
+                        onKeyDown={e => e.key === "Enter" && canStart && startPipeline()}
+                        placeholder="https://youtube.com/watch?v=... or video ID"
+                        className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-200"
+                      />
+                      <Button onClick={startPipeline} disabled={!canStart}
+                        className="shrink-0 bg-amber-400 hover:bg-amber-500 text-amber-950 font-semibold px-5 h-auto rounded-lg disabled:opacity-40">
+                        {starting || isRunning ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Working…</> : <><Sparkles className="w-4 h-4 mr-2" />Create Clips</>}
+                      </Button>
+                    </div>
                   </div>
                 ) : (
                   <div>
@@ -418,19 +425,36 @@ export default function ClipperPage() {
                 </div>
               )}
 
-              {isError && (
-                <div className="flex items-start gap-2 bg-red-50 border border-red-100 rounded-lg px-3 py-2.5">
-                  <AlertCircle className="w-3.5 h-3.5 text-red-500 mt-0.5 shrink-0" />
-                  <div>
-                    <p className="text-xs text-red-700">{job.error}</p>
-                    {(job.error?.toLowerCase().includes("bot") || job.error?.toLowerCase().includes("cookies")) && (
-                      <p className="text-xs text-red-500 mt-1">
-                        💡 <button className="underline font-medium" onClick={() => setShowCookies(true)}>Add YouTube cookies</button> to fix, or use the <button className="underline font-medium" onClick={() => { reset(); setTab("upload"); }}>Upload tab</button> to bypass YouTube entirely.
-                      </p>
-                    )}
+              {isError && (() => {
+                const err = job.error ?? "";
+                const isCloudBlocked = err.startsWith("CLOUD_BLOCKED:");
+                const isCookiesExpired = err.startsWith("COOKIES_EXPIRED:");
+                const cleanMsg = err.replace(/^(CLOUD_BLOCKED|COOKIES_EXPIRED):\s*/, "");
+                return (
+                  <div className={cn("rounded-lg px-3 py-3 border",
+                    isCloudBlocked ? "bg-orange-50 border-orange-200" :
+                    isCookiesExpired ? "bg-yellow-50 border-yellow-200" :
+                    "bg-red-50 border-red-100"
+                  )}>
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className={cn("w-3.5 h-3.5 mt-0.5 shrink-0",
+                        isCloudBlocked ? "text-orange-500" : isCookiesExpired ? "text-yellow-500" : "text-red-500"
+                      )} />
+                      <div className="space-y-2">
+                        {isCloudBlocked && <p className="text-xs font-bold text-orange-800">YouTube blocked this download from the cloud server</p>}
+                        {isCookiesExpired && <p className="text-xs font-bold text-yellow-800">Your YouTube cookies have expired</p>}
+                        <p className={cn("text-xs", isCloudBlocked ? "text-orange-700" : isCookiesExpired ? "text-yellow-700" : "text-red-700")}>{cleanMsg}</p>
+                        {(isCloudBlocked || isCookiesExpired) && (
+                          <button onClick={() => { reset(); setTab("upload"); }}
+                            className="mt-1 flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors">
+                            <Upload className="w-3 h-3" /> Switch to Upload tab →
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {(isDone || isError) && (
                 <button onClick={reset} className="text-xs text-amber-600 hover:text-amber-800 underline">← Start new</button>

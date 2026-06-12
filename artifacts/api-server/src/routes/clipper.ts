@@ -143,14 +143,22 @@ async function downloadVideo(videoId: string, outDir: string, job: ClipJob): Pro
     proc.on("close", code => {
       if (code === 0) { resolve(); return; }
       const msg = stderr.toLowerCase();
-      if (msg.includes("sign in") || msg.includes("bot") || msg.includes("login")) {
+      if (msg.includes("no longer valid") || msg.includes("rotated")) {
         reject(new Error(
-          "YouTube bot detection triggered. Add your YouTube cookies using the panel above, then retry."
+          "COOKIES_EXPIRED: Your YouTube cookies have expired. YouTube rotates session tokens frequently — re-export them immediately after opening YouTube, or use the Upload tab instead."
+        ));
+      } else if (msg.includes("sign in") || msg.includes("bot") || msg.includes("login")) {
+        reject(new Error(
+          "CLOUD_BLOCKED: YouTube blocks downloads from cloud servers for this video. This is a YouTube restriction — cookies cannot fix it when the server IP differs from your browser IP. Use the Upload tab: download the video on your device, then upload it here."
         ));
       } else if (msg.includes("private") || msg.includes("unavailable")) {
         reject(new Error("Video is private or unavailable."));
+      } else if (msg.includes("not available") || msg.includes("requested format")) {
+        reject(new Error(
+          "CLOUD_BLOCKED: YouTube is blocking this video from cloud servers. Use the Upload tab: download the video on your device, then upload it here."
+        ));
       } else {
-        reject(new Error(`Download failed: ${stderr.slice(-400)}`));
+        reject(new Error(`Download failed: ${stderr.slice(-300)}`));
       }
     });
     proc.on("error", reject);
