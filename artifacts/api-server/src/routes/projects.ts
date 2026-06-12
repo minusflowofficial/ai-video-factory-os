@@ -10,6 +10,7 @@ import {
   CreateProjectBody,
   UpdateProjectBody,
 } from "@workspace/api-zod";
+import { searchMixkitVideos, searchMixkitMusic } from "../mixkit-search";
 
 const router: IRouter = Router();
 const execFileAsync = promisify(execFile);
@@ -43,27 +44,6 @@ function getClipConfig(secs: number): { numClips: number; clipDur: number } {
   return { numClips: 8, clipDur: secs / 8 };
 }
 
-// ---------------------------------------------------------------------------
-// Mixkit CDN video pools (server-side confirmed 200)
-// ---------------------------------------------------------------------------
-const MIXKIT_VIDEOS: Record<string, number[]> = {
-  technology: [2523,2524,2525,2526,2527,4007,4008,4009,4010,4011,4012,26076,26077,26078],
-  business:   [2586,2587,2588,2589,2590,2867,2868,2869,2870,4013,4014,4015,4016,4017],
-  nature:     [1120,1121,1122,1123,1124,1487,1488,1489,1490,4019,4020,4021,4022,4023],
-  fitness:    [2580,2581,2582,2583,2584,4025,4026,4027,4028,4029,4030],
-  crypto:     [2523,2524,2528,2530,2531,2532,2533,4007,4008,4009],
-  finance:    [2534,2535,2536,2537,2538,2586,2587,2588,4010,4011],
-  travel:     [2553,2554,2555,2556,2557,1120,1121,1122,4019,4020,4021],
-  people:     [2867,2868,2869,2870,2871,4009,4010,4011,4012,4013],
-  abstract:   [1487,1488,1489,1490,1491,4007,4013,4018,4024,4029],
-  default:    [2523,2588,1122,2867,1487,4007,4009,4013,4018,4023],
-};
-
-const MUSIC_BY_CATEGORY: Record<string, number> = {
-  technology: 838, business: 740, nature: 872, fitness: 741,
-  crypto: 838,  finance: 740,  travel: 739,  people: 739,
-  abstract: 873, default: 738,
-};
 
 const STOP_WORDS = new Set([
   "the","a","an","and","or","is","in","of","to","for","with","how","why","what",
@@ -606,7 +586,7 @@ router.post("/projects/:id/generate-script", async (req, res): Promise<void> => 
 
 // ---------------------------------------------------------------------------
 // Pipeline: Generate Assets
-// Picks numClips assets based on video duration
+// Dynamically searches Mixkit by keyword, verifies clips are accessible
 // ---------------------------------------------------------------------------
 router.post("/projects/:id/generate-assets", async (req, res): Promise<void> => {
   const id = parseInt(req.params.id, 10);
@@ -614,33 +594,52 @@ router.post("/projects/:id/generate-assets", async (req, res): Promise<void> => 
   const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, id));
   if (!project) { res.status(404).json({ error: "Not found" }); return; }
 
-  const totalSecs = parseDuration(project.duration ?? "60s");
-  const { numClips } = getClipConfig(totalSecs);
-
-  const category = detectCategory(project.title, project.topic, project.niche);
-  const kws      = extractKeywords(project.title, project.topic, project.niche);
-  const pool     = MIXKIT_VIDEOS[category] ?? MIXKIT_VIDEOS.default;
-  const ids      = randomPick(pool, numClips);
-
-  const assets = JSON.stringify(ids.map((mixkitId, i) => ({
-    id: i + 1, type: "video", mixkitId,
-    url: mixkitVideoUrl(mixkitId),
-    thumbnail: mixkitThumbUrl(mixkitId),
-    source: "mixkit", category,
-    keyword: kws[i] ?? kws[0] ?? project.title,
-  })));
-
-  const [updated] = await db.update(projectsTable).set({
+  // Respond immediately with "fetching-assets" so UI shows progress
+  const [interim] = await db.update(projectsTable).set({
     status: "fetching-assets",
-    assets,
     updatedAt: new Date(),
   }).where(eq(projectsTable.id, id)).returning();
+  res.json(serializeProject(interim));
 
-  res.json(serializeProject(updated));
+  // Run asset search in background — async so response is already sent
+  (async () => {
+    try {
+      const totalSecs = parseDuration(project.duration ?? "60s");
+      const { numClips } = getClipConfig(totalSecs);
+
+      // Build keyword list from topic, niche, title — most specific first
+      const kws = extractKeywords(project.title, project.topic, project.niche);
+      // Also add raw topic/niche slugs as top-priority search terms
+      const searchTerms = [
+        project.topic ?? "",
+        project.niche ?? "",
+        ...kws,
+      ].map(s => s.trim()).filter(Boolean);
+
+      // Dynamic search — scrapes Mixkit pages for real keyword-matched clips
+      const ids = await searchMixkitVideos(searchTerms, numClips);
+
+      const assets = JSON.stringify(ids.map((mixkitId, i) => ({
+        id: i + 1, type: "video", mixkitId,
+        url: mixkitVideoUrl(mixkitId),
+        thumbnail: mixkitThumbUrl(mixkitId),
+        source: "mixkit",
+        keyword: searchTerms[i] ?? searchTerms[0] ?? project.title,
+      })));
+
+      await db.update(projectsTable).set({
+        assets,
+        updatedAt: new Date(),
+      }).where(eq(projectsTable.id, id));
+    } catch (err) {
+      console.error(`[generate-assets] project ${id} failed:`, err);
+    }
+  })();
 });
 
 // ---------------------------------------------------------------------------
-// Pipeline: Generate Voiceover (selects category-matched music)
+// Pipeline: Generate Voiceover
+// Dynamically searches Mixkit music by keyword, picks a matching track
 // ---------------------------------------------------------------------------
 router.post("/projects/:id/generate-voiceover", async (req, res): Promise<void> => {
   const id = parseInt(req.params.id, 10);
@@ -648,16 +647,33 @@ router.post("/projects/:id/generate-voiceover", async (req, res): Promise<void> 
   const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, id));
   if (!project) { res.status(404).json({ error: "Not found" }); return; }
 
-  const category = detectCategory(project.title, project.topic, project.niche);
-  const musicId  = MUSIC_BY_CATEGORY[category] ?? 738;
-
-  const [updated] = await db.update(projectsTable).set({
+  // Respond immediately
+  const [interim] = await db.update(projectsTable).set({
     status: "voiceover",
-    voiceoverUrl: mixkitMusicUrl(musicId),
     updatedAt: new Date(),
   }).where(eq(projectsTable.id, id)).returning();
+  res.json(serializeProject(interim));
 
-  res.json(serializeProject(updated));
+  // Search for matching music in background
+  (async () => {
+    try {
+      const kws = extractKeywords(project.title, project.topic, project.niche);
+      const searchTerms = [
+        project.topic ?? "",
+        project.niche ?? "",
+        ...kws,
+      ].map(s => s.trim()).filter(Boolean);
+
+      const musicUrl = await searchMixkitMusic(searchTerms);
+
+      await db.update(projectsTable).set({
+        voiceoverUrl: musicUrl,
+        updatedAt: new Date(),
+      }).where(eq(projectsTable.id, id));
+    } catch (err) {
+      console.error(`[generate-voiceover] project ${id} failed:`, err);
+    }
+  })();
 });
 
 // ---------------------------------------------------------------------------
@@ -680,12 +696,11 @@ router.post("/projects/:id/render", async (req, res): Promise<void> => {
     return;
   }
 
-  // Resolve music URL
+  // Resolve music URL — use explicit trackId, then project's searched music, then default fallback
   const bodyMusicId = typeof req.body?.musicTrackId === "number" ? req.body.musicTrackId : null;
-  const category    = detectCategory(project.title, project.topic, project.niche);
   const musicUrl    = bodyMusicId
     ? mixkitMusicUrl(bodyMusicId)
-    : (project.voiceoverUrl ?? mixkitMusicUrl(MUSIC_BY_CATEGORY[category] ?? 738));
+    : (project.voiceoverUrl ?? "https://assets.mixkit.co/music/872/872.mp3");
 
   // Duration-based clip timing
   const totalSecs = parseDuration(project.duration ?? "60s");
