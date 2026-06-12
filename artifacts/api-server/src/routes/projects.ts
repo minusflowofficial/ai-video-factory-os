@@ -132,14 +132,111 @@ async function downloadFile(url: string, dest: string): Promise<void> {
 // ---------------------------------------------------------------------------
 // Render options
 // ---------------------------------------------------------------------------
+export type CaptionStyle =
+  | "modern"     // white text, drop shadow only
+  | "bold-box"   // white on dark semi-transparent box (YouTube style)
+  | "netflix"    // white on solid black bar
+  | "tiktok"     // large white with thick black outline
+  | "cinematic"  // amber/gold text, wide dark box, bottom
+  | "news";      // black text on white/yellow ticker strip
+
 export interface RenderOptions {
   showTitle:        boolean;
   showCaptions:     boolean;
+  captionStyle:     CaptionStyle;
   transitionEffect: "fade" | "xfade" | "zoom";
   addSfx:           boolean;
   musicTrackId?:    number;
   aspectRatio?:     string; // "16:9" | "9:16" | "1:1"
   clipDur?:         number; // per-clip duration in seconds
+}
+
+// ---------------------------------------------------------------------------
+// Caption style → FFmpeg drawtext args
+// ---------------------------------------------------------------------------
+function buildCaptionFilter(
+  prev: string, out: string,
+  capFile: string,
+  tStart: number, tEnd: number,
+  W: number, H: number,
+  style: CaptionStyle,
+  FONT: string,
+): string {
+  const enable = `enable='between(t\\,${tStart}\\,${tEnd})'`;
+  const xCenter = `x='max(40,(w-text_w)/2)'`;
+
+  switch (style) {
+    case "modern":
+      return (
+        `[${prev}]drawtext=fontfile=${FONT}:textfile=${capFile}:` +
+        `fontsize=24:fontcolor=white:` +
+        `${xCenter}:y=h*0.86:` +
+        `line_spacing=4:` +
+        `shadowcolor=black@0.9:shadowx=2:shadowy=2:` +
+        `${enable}[${out}]`
+      );
+
+    case "bold-box":
+      return (
+        `[${prev}]drawtext=fontfile=${FONT}:textfile=${capFile}:` +
+        `fontsize=26:fontcolor=white:` +
+        `${xCenter}:y=h*0.85:` +
+        `line_spacing=5:` +
+        `box=1:boxcolor=black@0.72:boxborderw=14:` +
+        `shadowcolor=black@0.5:shadowx=1:shadowy=1:` +
+        `${enable}[${out}]`
+      );
+
+    case "netflix":
+      return (
+        `[${prev}]drawtext=fontfile=${FONT}:textfile=${capFile}:` +
+        `fontsize=24:fontcolor=white:` +
+        `${xCenter}:y=h*0.87:` +
+        `line_spacing=5:` +
+        `box=1:boxcolor=black@0.88:boxborderw=18:` +
+        `${enable}[${out}]`
+      );
+
+    case "tiktok":
+      return (
+        `[${prev}]drawtext=fontfile=${FONT}:textfile=${capFile}:` +
+        `fontsize=30:fontcolor=white:` +
+        `${xCenter}:y=h*0.83:` +
+        `line_spacing=6:` +
+        `bordercolor=black:borderw=3:` +
+        `${enable}[${out}]`
+      );
+
+    case "cinematic":
+      return (
+        `[${prev}]drawtext=fontfile=${FONT}:textfile=${capFile}:` +
+        `fontsize=22:fontcolor=#FFD580:` +
+        `${xCenter}:y=h*0.88:` +
+        `line_spacing=4:` +
+        `box=1:boxcolor=#1a1a1a@0.75:boxborderw=20:` +
+        `bordercolor=#FFD580@0.3:borderw=1:` +
+        `${enable}[${out}]`
+      );
+
+    case "news":
+      return (
+        `[${prev}]drawtext=fontfile=${FONT}:textfile=${capFile}:` +
+        `fontsize=22:fontcolor=#111111:` +
+        `${xCenter}:y=h*0.90:` +
+        `line_spacing=4:` +
+        `box=1:boxcolor=#F5C518@0.95:boxborderw=16:` +
+        `${enable}[${out}]`
+      );
+
+    default:
+      return (
+        `[${prev}]drawtext=fontfile=${FONT}:textfile=${capFile}:` +
+        `fontsize=24:fontcolor=white:` +
+        `${xCenter}:y=h*0.86:` +
+        `box=1:boxcolor=black@0.65:boxborderw=10:` +
+        `${enable}[${out}]`
+      );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -265,24 +362,19 @@ async function buildFfmpegArgs(
   }
 
   if (showCaptions) {
+    const capStyle = opts.captionStyle ?? "bold-box";
+    const maxChars = capStyle === "tiktok" ? 32 : 38;
     const numCaptions = Math.min(n, scenes.length);
     for (let i = 0; i < numCaptions; i++) {
       const raw     = (scenes[i]?.text ?? "").split("\n")[0];
-      const capText = wrapText(raw, 38, 2);
+      const capText = wrapText(raw, maxChars, 2);
       if (!capText) continue;
       const capFile = path.join(dir, `cap${i}.txt`);
       await fs.promises.writeFile(capFile, capText, "utf8");
       const tStart = +(i * clipDur).toFixed(3);
       const tEnd   = +((i + 1) * clipDur - 0.2).toFixed(3);
       const out    = `v_c${i}`;
-      parts.push(
-        `[${prev}]drawtext=fontfile=${FONT}:textfile=${capFile}:` +
-        `fontsize=22:fontcolor=white:` +
-        `x='max(60,(w-text_w)/2)':y=h*0.88:` +
-        `line_spacing=5:` +
-        `box=1:boxcolor=black@0.65:boxborderw=10:` +
-        `enable='between(t\\,${tStart}\\,${tEnd})'[${out}]`
-      );
+      parts.push(buildCaptionFilter(prev, out, capFile, tStart, tEnd, W, H, capStyle, FONT));
       prev = out;
     }
   }
@@ -707,9 +799,12 @@ router.post("/projects/:id/render", async (req, res): Promise<void> => {
   const { numClips, clipDur } = getClipConfig(totalSecs);
   const clipsToUse = Math.min(assets.length, numClips);
 
+  const VALID_CAP_STYLES = ["modern","bold-box","netflix","tiktok","cinematic","news"];
   const opts: RenderOptions = {
     showTitle:        req.body?.showTitle        === true,
     showCaptions:     req.body?.showCaptions     === true,
+    captionStyle:     VALID_CAP_STYLES.includes(req.body?.captionStyle)
+      ? req.body.captionStyle : "bold-box",
     transitionEffect: ["fade","xfade","zoom"].includes(req.body?.transitionEffect)
       ? req.body.transitionEffect : "xfade",
     addSfx:           req.body?.addSfx           === true,

@@ -43,13 +43,24 @@ const TRANSITIONS = [
 ] as const;
 
 type TransitionEffect = "fade" | "xfade" | "zoom";
+type CaptionStyle    = "modern" | "bold-box" | "netflix" | "tiktok" | "cinematic" | "news";
 
 interface RenderOpts {
   showTitle:        boolean;
   showCaptions:     boolean;
+  captionStyle:     CaptionStyle;
   transitionEffect: TransitionEffect;
   addSfx:           boolean;
 }
+
+const CAPTION_STYLES: { value: CaptionStyle; label: string; hint: string; preview: string }[] = [
+  { value: "modern",    label: "Modern",    hint: "White text, drop shadow, minimal",      preview: "text-white drop-shadow-lg" },
+  { value: "bold-box",  label: "Bold Box",  hint: "White on dark box (YouTube style)",     preview: "text-white bg-black/70 px-1" },
+  { value: "netflix",   label: "Netflix",   hint: "White on solid black bar",              preview: "text-white bg-black px-1" },
+  { value: "tiktok",    label: "TikTok",    hint: "Large white with thick black outline",  preview: "text-white font-black [text-shadow:_-2px_-2px_0_#000,_2px_-2px_0_#000,_-2px_2px_0_#000,_2px_2px_0_#000]" },
+  { value: "cinematic", label: "Cinematic", hint: "Gold text on dark widescreen bar",      preview: "text-amber-300 bg-gray-900/80 px-1" },
+  { value: "news",      label: "News",      hint: "Black text on yellow ticker strip",     preview: "text-black bg-yellow-400 px-1" },
+];
 
 const SCRIPTED_STEPS    = ["Generating script", "Fetching assets", "Matching music", "Rendering video"];
 const SATISFYING_STEPS  = ["Fetching assets", "Matching music", "Rendering video"];
@@ -107,6 +118,7 @@ export default function StudioEditor() {
   const [renderOpts, setRenderOpts] = useState<RenderOpts>({
     showTitle:        false,
     showCaptions:     false,
+    captionStyle:     "bold-box",
     transitionEffect: "xfade",
     addSfx:           false,
   });
@@ -141,16 +153,18 @@ export default function StudioEditor() {
     setRenderOpts({
       showTitle:        false,
       showCaptions:     false,
+      captionStyle:     "bold-box",
       transitionEffect: "zoom",
       addSfx:           false,
     });
-    if (!selectedTrack) setSelectedTrack(872); // Lo-Fi Afternoon
+    if (!selectedTrack) setSelectedTrack(872);
   };
 
   const applyScriptedPreset = () => {
     setRenderOpts({
       showTitle:        true,
       showCaptions:     true,
+      captionStyle:     "bold-box",
       transitionEffect: "xfade",
       addSfx:           true,
     });
@@ -165,6 +179,7 @@ export default function StudioEditor() {
         musicTrackId:     selectedTrack ?? 738,
         showTitle:        renderOpts.showTitle,
         showCaptions:     renderOpts.showCaptions,
+        captionStyle:     renderOpts.captionStyle,
         transitionEffect: renderOpts.transitionEffect,
         addSfx:           renderOpts.addSfx,
       }),
@@ -502,6 +517,41 @@ export default function StudioEditor() {
                   <span className="text-[11px] text-gray-600">Captions per scene</span>
                   <Toggle value={renderOpts.showCaptions} onChange={v => setRenderOpts(o => ({ ...o, showCaptions: v }))} />
                 </div>
+
+                {/* Caption style picker — visible only when captions are ON */}
+                {renderOpts.showCaptions && (
+                  <div className="ml-0 pl-3 border-l-2 border-amber-100 space-y-1.5">
+                    <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Caption style</p>
+                    <div className="grid grid-cols-3 gap-1">
+                      {CAPTION_STYLES.map(s => (
+                        <button
+                          key={s.value}
+                          title={s.hint}
+                          onClick={() => setRenderOpts(o => ({ ...o, captionStyle: s.value }))}
+                          className={cn(
+                            "flex flex-col items-center gap-1 p-2 rounded-lg border text-center transition-all",
+                            renderOpts.captionStyle === s.value
+                              ? "bg-amber-50 border-amber-400 ring-1 ring-amber-300"
+                              : "bg-white border-gray-200 hover:border-gray-300",
+                          )}
+                        >
+                          {/* Mini caption preview */}
+                          <div className="w-full h-6 bg-gray-800 rounded overflow-hidden flex items-end pb-0.5">
+                            <span className={cn("text-[7px] w-full text-center truncate leading-tight px-0.5", s.preview)}>
+                              Abc Text
+                            </span>
+                          </div>
+                          <span className={cn(
+                            "text-[9px] font-semibold",
+                            renderOpts.captionStyle === s.value ? "text-amber-700" : "text-gray-600",
+                          )}>
+                            {s.label}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Transition SFX toggle */}
                 <div className="flex items-center justify-between">
