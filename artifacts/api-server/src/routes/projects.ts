@@ -18,8 +18,30 @@ const execFileAsync = promisify(execFile);
 // Constants
 // ---------------------------------------------------------------------------
 const FONT     = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
-const CLIP_DUR = 5;  // seconds per clip
-const XFADE_DUR = 0.5; // crossfade duration in seconds
+const XFADE_DUR = 0.5;
+
+// ---------------------------------------------------------------------------
+// Duration helpers
+// ---------------------------------------------------------------------------
+/** Parse "30s", "60s", "3m", "5min" → seconds */
+function parseDuration(dur: string): number {
+  if (!dur) return 60;
+  const m = dur.trim().match(/^(\d+(?:\.\d+)?)\s*(m(?:in)?|s(?:ec)?)?$/i);
+  if (!m) return 60;
+  const n = parseFloat(m[1]);
+  const unit = (m[2] ?? "s").toLowerCase();
+  return unit.startsWith("m") ? Math.round(n * 60) : Math.round(n);
+}
+
+/** Choose number of clips and per-clip duration based on total video length */
+function getClipConfig(secs: number): { numClips: number; clipDur: number } {
+  if (secs <= 15)  return { numClips: 2, clipDur: secs / 2 };
+  if (secs <= 40)  return { numClips: 3, clipDur: secs / 3 };
+  if (secs <= 90)  return { numClips: 4, clipDur: secs / 4 };
+  if (secs <= 180) return { numClips: 5, clipDur: secs / 5 };
+  if (secs <= 300) return { numClips: 6, clipDur: secs / 6 };
+  return { numClips: 8, clipDur: secs / 8 };
+}
 
 // ---------------------------------------------------------------------------
 // Mixkit CDN video pools (server-side confirmed 200)
@@ -84,11 +106,9 @@ const mixkitMusicUrl = (id: number) => `https://assets.mixkit.co/music/${id}/${i
 // ---------------------------------------------------------------------------
 // Text helpers
 // ---------------------------------------------------------------------------
-
-/** Wraps text to at most maxLines lines, each at most maxCharsPerLine chars */
 function wrapText(text: string, maxCharsPerLine: number, maxLines: number): string {
   const clean = text
-    .replace(/[^\x00-\x7F]/g, "")   // strip non-ASCII (emoji etc.)
+    .replace(/[^\x00-\x7F]/g, "")
     .replace(/\s+/g, " ")
     .trim();
   if (!clean) return "";
@@ -133,16 +153,17 @@ async function downloadFile(url: string, dest: string): Promise<void> {
 // Render options
 // ---------------------------------------------------------------------------
 export interface RenderOptions {
-  showTitle: boolean;
-  showCaptions: boolean;
+  showTitle:        boolean;
+  showCaptions:     boolean;
   transitionEffect: "fade" | "xfade" | "zoom";
-  addSfx: boolean;
-  musicTrackId?: number;
+  addSfx:           boolean;
+  musicTrackId?:    number;
+  aspectRatio?:     string; // "16:9" | "9:16" | "1:1"
+  clipDur?:         number; // per-clip duration in seconds
 }
 
 // ---------------------------------------------------------------------------
 // FFmpeg filter_complex builder
-// Returns FFmpeg CLI args. Writes temp text files for title/captions.
 // ---------------------------------------------------------------------------
 async function buildFfmpegArgs(
   clipPaths: string[],
@@ -155,9 +176,16 @@ async function buildFfmpegArgs(
 ): Promise<string[]> {
   const n = clipPaths.length;
   const { showTitle, showCaptions, transitionEffect, addSfx } = opts;
+  const AR       = opts.aspectRatio ?? "16:9";
+  const clipDur  = opts.clipDur     ?? 5;
+
+  // Output dimensions based on aspect ratio
+  const W = AR === "9:16" ? 720  : AR === "1:1" ? 720  : 1280;
+  const H = AR === "9:16" ? 1280 : AR === "1:1" ? 720  : 720;
+
   const parts: string[] = [];
 
-  // ── Generate transition SFX (synthetic whoosh via FFmpeg audio synthesis) ──
+  // ── Synthetic SFX (whoosh at each transition) ────────────────────────────
   let sfxPath: string | null = null;
   if (addSfx && n > 1) {
     sfxPath = path.join(dir, "sfx.mp3");
@@ -168,56 +196,79 @@ async function buildFfmpegArgs(
         sfxPath,
       ]);
     } catch {
-      sfxPath = null; // silently skip SFX if generation fails
+      sfxPath = null;
     }
+  }
+
+  // ── Per-clip scale filter (handles all aspect ratios) ────────────────────
+  // For 9:16 and 1:1: scale landscape to fill the HEIGHT, then center-crop the width
+  // For 16:9: scale to fit width, letterbox if needed
+  function clipScaleFilter(i: number): string {
+    if (AR === "9:16" || AR === "1:1") {
+      // scale to fill height → width may exceed target → crop center
+      return (
+        `[${i}:v]scale=-2:${H},crop=${W}:${H}:(iw-${W})/2:0,` +
+        `setsar=1,fps=24,trim=0:${clipDur},setpts=PTS-STARTPTS`
+      );
+    }
+    // 16:9 default: fit with black bars if needed
+    return (
+      `[${i}:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
+      `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24,` +
+      `trim=0:${clipDur},setpts=PTS-STARTPTS`
+    );
   }
 
   // ── Per-clip video filter ────────────────────────────────────────────────
   for (let i = 0; i < n; i++) {
-    // Scale to 1280x720, normalize SAR + fps, trim to CLIP_DUR
-    const base =
-      `[${i}:v]scale=1280:720:force_original_aspect_ratio=decrease,` +
-      `pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=24,` +
-      `trim=0:${CLIP_DUR},setpts=PTS-STARTPTS`;
+    const base = clipScaleFilter(i);
 
     if (transitionEffect === "zoom") {
-      // Ken Burns: even clips zoom IN (1.0→1.3), odd clips zoom OUT (1.3→1.0)
-      // zoompan d=1: one output frame per input frame, `on` increments globally
       const zExpr = i % 2 === 0
-        ? `min(1.0+0.003*on,1.3)`   // zoom in
-        : `max(1.3-0.003*on,1.0)`;  // zoom out
+        ? `min(1.0+0.003*on,1.3)`
+        : `max(1.3-0.003*on,1.0)`;
+      const fadeIn  = `,fade=t=in:st=0:d=0.4`;
+      const fadeOut = `,fade=t=out:st=${(clipDur - 0.4).toFixed(2)}:d=0.4`;
       parts.push(
         `${base},` +
-        `zoompan=z='${zExpr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:fps=24:s=1280x720,` +
-        `fade=t=in:st=0:d=0.4,fade=t=out:st=${CLIP_DUR - 0.4}:d=0.4[v${i}]`
+        `zoompan=z='${zExpr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:fps=24:s=${W}x${H}` +
+        `${fadeIn}${fadeOut}[v${i}]`
       );
     } else if (transitionEffect === "xfade") {
-      // xfade handles inter-clip transitions; only add fade on first/last clip
-      const fi = i === 0 ? `,fade=t=in:st=0:d=0.4` : "";
-      const fo = i === n - 1 ? `,fade=t=out:st=${CLIP_DUR - 0.4}:d=0.4` : "";
+      const fi = i === 0           ? `,fade=t=in:st=0:d=0.4` : "";
+      const fo = i === n - 1       ? `,fade=t=out:st=${(clipDur - 0.4).toFixed(2)}:d=0.4` : "";
       parts.push(`${base}${fi}${fo}[v${i}]`);
     } else {
-      // Fade: fade in/out on every clip
-      parts.push(`${base},fade=t=in:st=0:d=0.4,fade=t=out:st=${CLIP_DUR - 0.4}:d=0.4[v${i}]`);
+      // Simple fade in/out on every clip
+      parts.push(
+        `${base},fade=t=in:st=0:d=0.4,` +
+        `fade=t=out:st=${(clipDur - 0.4).toFixed(2)}:d=0.4[v${i}]`
+      );
     }
   }
 
-  // ── Video concatenation / transitions ────────────────────────────────────
+  // ── Video concatenation / xfade transitions ───────────────────────────────
+  let finalVideoLabel: string;
+
   if (transitionEffect === "xfade" && n > 1) {
-    let prev = "[v0]";
+    let xprev = "v0";
     for (let i = 1; i < n; i++) {
-      const offset = +(i * (CLIP_DUR - XFADE_DUR)).toFixed(3);
-      const out = i === n - 1 ? "[vcat]" : `[x${i}]`;
-      parts.push(`${prev}[v${i}]xfade=transition=fade:duration=${XFADE_DUR}:offset=${offset}${out}`);
-      prev = out;
+      const offset = +((i) * (clipDur - XFADE_DUR)).toFixed(3);
+      const out    = i === n - 1 ? "vcat" : `x${i}`;
+      parts.push(`[${xprev}][v${i}]xfade=transition=fade:duration=${XFADE_DUR}:offset=${offset}[${out}]`);
+      xprev = out;
     }
+    finalVideoLabel = "vcat";
+  } else if (n === 1) {
+    finalVideoLabel = "v0";
   } else {
     const catIn = Array.from({ length: n }, (_, i) => `[v${i}]`).join("");
     parts.push(`${catIn}concat=n=${n}:v=1:a=0[vcat]`);
+    finalVideoLabel = "vcat";
   }
 
-  // ── Text overlays (optional; use textfile to avoid all escaping issues) ──
-  let prev = "vcat";
+  // ── Text overlays ─────────────────────────────────────────────────────────
+  let prev = finalVideoLabel;
 
   if (showTitle) {
     const titleFile = path.join(dir, "title.txt");
@@ -236,14 +287,14 @@ async function buildFfmpegArgs(
   if (showCaptions) {
     const numCaptions = Math.min(n, scenes.length);
     for (let i = 0; i < numCaptions; i++) {
-      const raw = (scenes[i]?.text ?? "").split("\n")[0];
+      const raw     = (scenes[i]?.text ?? "").split("\n")[0];
       const capText = wrapText(raw, 38, 2);
       if (!capText) continue;
       const capFile = path.join(dir, `cap${i}.txt`);
       await fs.promises.writeFile(capFile, capText, "utf8");
-      const tStart = i * CLIP_DUR;
-      const tEnd   = (i + 1) * CLIP_DUR;
-      const out    = i === numCaptions - 1 ? "v_cap_end" : `v_c${i}`;
+      const tStart = +(i * clipDur).toFixed(3);
+      const tEnd   = +((i + 1) * clipDur - 0.2).toFixed(3);
+      const out    = `v_c${i}`;
       parts.push(
         `[${prev}]drawtext=fontfile=${FONT}:textfile=${capFile}:` +
         `fontsize=22:fontcolor=white:` +
@@ -256,49 +307,47 @@ async function buildFfmpegArgs(
     }
   }
 
-  // null pass-through to normalize the final label to [vfinal]
-  parts.push(`[${prev}]null[vfinal]`);
-
-  // ── Audio mix ────────────────────────────────────────────────────────────
+  // ── Audio mix ─────────────────────────────────────────────────────────────
   const musicIdx = n;
+  const totalDur = transitionEffect === "xfade" && n > 1
+    ? +(n * clipDur - (n - 1) * XFADE_DUR).toFixed(3)
+    : n * clipDur;
 
   if (sfxPath && n > 1) {
     const sfxIdx   = n + 1;
     const nTrans   = n - 1;
-    // Pre-boost music so amix(÷2) still gives target volume
-    parts.push(`[${musicIdx}:a]volume=0.6,afade=t=in:st=0:d=1.5[aout_m]`);
-    // Split sfx into one copy per transition
+    parts.push(`[${musicIdx}:a]volume=0.6,afade=t=in:st=0:d=1.5,afade=t=out:st=${totalDur - 2}:d=2[aout_m]`);
     const splitOut = Array.from({ length: nTrans }, (_, i) => `[sfxr${i}]`).join("");
     parts.push(`[${sfxIdx}:a]asplit=${nTrans}${splitOut}`);
-    // Delay each copy to its transition timestamp
     for (let i = 0; i < nTrans; i++) {
       const transTime = transitionEffect === "xfade"
-        ? (i + 1) * (CLIP_DUR - XFADE_DUR)
-        : (i + 1) * CLIP_DUR;
+        ? (i + 1) * (clipDur - XFADE_DUR)
+        : (i + 1) * clipDur;
       const delayMs = Math.round(transTime * 1000);
       parts.push(`[sfxr${i}]volume=0.7,adelay=${delayMs}|${delayMs}[sfxd${i}]`);
     }
-    // Mix sfx copies together (then boost to compensate amix normalization)
     if (nTrans === 1) {
-      parts.push(`[sfxd0]null[sfx_m]`);
+      parts.push(`[sfxd0]acopy[sfx_m]`);
     } else {
       const sfxIn = Array.from({ length: nTrans }, (_, i) => `[sfxd${i}]`).join("");
       parts.push(`${sfxIn}amix=inputs=${nTrans}:duration=longest[sfx_norm]`);
       parts.push(`[sfx_norm]volume=${nTrans}[sfx_m]`);
     }
-    // Final mix: music + sfx (÷2 by amix, compensated by pre-boost)
     parts.push(`[aout_m][sfx_m]amix=inputs=2:duration=first[aout]`);
   } else {
-    parts.push(`[${musicIdx}:a]volume=0.3,afade=t=in:st=0:d=1.5[aout]`);
+    parts.push(
+      `[${musicIdx}:a]volume=0.3,` +
+      `afade=t=in:st=0:d=1.5,` +
+      `afade=t=out:st=${Math.max(totalDur - 2, 0).toFixed(3)}:d=2` +
+      `[aout]`
+    );
   }
 
-  // ── Assemble final args ──────────────────────────────────────────────────
-  const totalDur = transitionEffect === "xfade" && n > 1
-    ? +(n * CLIP_DUR - (n - 1) * XFADE_DUR).toFixed(3)
-    : n * CLIP_DUR;
-
+  // ── Assemble inputs with stream_loop so short clips fill clipDur ──────────
   const inputArgs: string[] = [];
-  for (const p of clipPaths)  inputArgs.push("-i", p);
+  for (const p of clipPaths) {
+    inputArgs.push("-stream_loop", "-1", "-i", p);
+  }
   inputArgs.push("-i", musicPath);
   if (sfxPath) inputArgs.push("-i", sfxPath);
 
@@ -306,12 +355,12 @@ async function buildFfmpegArgs(
     "-y",
     ...inputArgs,
     "-filter_complex", parts.join("; "),
-    "-map", "[vfinal]",
-    "-map", "[aout]",
-    "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-    "-c:a", "aac", "-b:a", "128k",
+    "-map",   `[${prev}]`,
+    "-map",   "[aout]",
+    "-c:v",   "libx264", "-preset", "fast", "-crf", "23",
+    "-c:a",   "aac", "-b:a", "128k",
     "-movflags", "+faststart",
-    "-t", String(totalDur),
+    "-t",     String(totalDur),
     outputPath,
   ];
 }
@@ -336,12 +385,13 @@ async function renderProject(
       .where(eq(projectsTable.id, id));
 
   try {
-    // Download video clips
+    // Download video clips with stream_loop support
     const clipPaths: string[] = [];
-    for (let i = 0; i < Math.min(assets.length, 4); i++) {
+    const numClips = Math.min(assets.length, 8);
+    for (let i = 0; i < numClips; i++) {
       const dest = path.join(dir, `clip${i}.mp4`);
       await downloadFile(assets[i].url, dest);
-      await setProgress(10 + i * 14);
+      await setProgress(10 + Math.floor((i / numClips) * 55));
       clipPaths.push(dest);
     }
 
@@ -350,14 +400,14 @@ async function renderProject(
     await downloadFile(musicUrl, musicPath);
     await setProgress(68);
 
-    // Build FFmpeg args (writes text files, generates SFX)
     const outputPath = path.join(dir, "output.mp4");
     await setProgress(72);
+
     const args = await buildFfmpegArgs(clipPaths, musicPath, title, scenes, outputPath, dir, opts);
 
-    // Run FFmpeg
+    // Run FFmpeg — any failure will throw (stderr included in error.message)
     await setProgress(75);
-    await execFileAsync("ffmpeg", args, { maxBuffer: 64 * 1024 * 1024 });
+    await execFileAsync("ffmpeg", args, { maxBuffer: 128 * 1024 * 1024 });
 
     await db.update(projectsTable).set({
       status: "completed",
@@ -368,11 +418,13 @@ async function renderProject(
     }).where(eq(projectsTable.id, id));
 
   } catch (err: any) {
-    // Fallback: mark complete with first Mixkit clip as video
+    // Log the real error so it shows up in server logs
+    const stderr = err?.stderr ?? err?.message ?? String(err);
+    console.error(`[render-${id}] FFmpeg failed:\n${stderr}`);
+
     await db.update(projectsTable).set({
-      status: "completed",
-      renderProgress: 100,
-      videoUrl: assets[0]?.url ?? null,
+      status: "error" as any,
+      renderProgress: 0,
       updatedAt: new Date(),
     }).where(eq(projectsTable.id, id));
   }
@@ -473,6 +525,7 @@ router.delete("/projects/:id", async (req, res): Promise<void> => {
 
 // ---------------------------------------------------------------------------
 // Pipeline: Generate Script
+// Builds scenes proportional to video duration. No forced CTA.
 // ---------------------------------------------------------------------------
 router.post("/projects/:id/generate-script", async (req, res): Promise<void> => {
   const id = parseInt(req.params.id, 10);
@@ -484,29 +537,66 @@ router.post("/projects/:id/generate-script", async (req, res): Promise<void> => 
   const topic  = project.topic ?? title;
   const niche  = project.niche ?? "";
   const kws    = extractKeywords(title, topic, niche);
-  const k0     = kws[0] ?? title;
-  const k1     = kws[1] ?? topic;
-  const k2     = kws[2] ?? niche;
 
-  const hook = `${title} — here's what nobody tells you.`;
-  const body =
-    `In this video, we break down everything you need to know about ${topic || title}. ` +
-    `Whether you're a beginner or already familiar with ${k0}, you'll find ` +
-    `actionable insights you can apply immediately. We'll cover ${kws.slice(0, 3).join(", ")} ` +
-    `and why mastering these concepts puts you ahead of 95% of people in this space.`;
-  const cta  = `If this was valuable, smash that like button and subscribe — we post weekly on ${niche || title}. Drop a comment below!`;
+  // Calculate how many scenes we need based on video duration
+  const totalSecs = parseDuration(project.duration ?? "60s");
+  const { numClips, clipDur } = getClipConfig(totalSecs);
 
-  const scenes = JSON.stringify([
-    { id: 1, text: hook,  duration: CLIP_DUR, visualIntent: `Opening — ${k0}`,      keywords: kws.slice(0, 3) },
-    { id: 2, text: `${k1} in action — discover how ${k1} is changing the game.`, duration: CLIP_DUR, visualIntent: `${k1} in action`, keywords: kws.slice(1, 4) },
-    { id: 3, text: body,  duration: CLIP_DUR, visualIntent: `Educational — ${k2}`,  keywords: kws.slice(2, 5) },
-    { id: 4, text: cta,   duration: CLIP_DUR, visualIntent: `Call to action`,        keywords: kws.slice(0, 2) },
-  ]);
+  // Build scene texts proportional to clip count
+  const k = (i: number) => kws[i] ?? kws[0] ?? title;
+
+  const sceneTexts: string[] = [];
+
+  // Always: hook as scene 1
+  sceneTexts.push(`${title} — here's what nobody tells you.`);
+
+  if (numClips === 2) {
+    sceneTexts.push(
+      `Dive deep into ${topic || title}. Master ${k(0)} and ${k(1)} to stay ahead.`
+    );
+  } else if (numClips === 3) {
+    sceneTexts.push(`${k(1)} in action — discover how ${k(1)} is changing the game.`);
+    sceneTexts.push(
+      `Whether you're a beginner or advanced, mastering ${k(0)}, ${k(2)} and ` +
+      `${k(3)} puts you ahead of 95% of people in this space.`
+    );
+  } else {
+    // 4+ clips: build body scenes covering the topic in depth
+    for (let i = 1; i < numClips; i++) {
+      const kw = k(i);
+      if (i === 1) {
+        sceneTexts.push(`${kw} in action — discover how ${kw} is reshaping ${topic || title}.`);
+      } else if (i === numClips - 1) {
+        // Last scene: strong summary, NO forced CTA
+        sceneTexts.push(
+          `Master ${kws.slice(0, 3).join(", ")} and you'll unlock results ` +
+          `most people in ${niche || "this space"} never achieve.`
+        );
+      } else {
+        sceneTexts.push(
+          `Deep dive into ${kw}: the tactics, frameworks and insights ` +
+          `behind every successful ${topic || title} strategy.`
+        );
+      }
+    }
+  }
+
+  const scenes = sceneTexts.map((text, i) => ({
+    id: i + 1,
+    text,
+    duration: Math.round(clipDur),
+    visualIntent: i === 0 ? `Opening — ${k(0)}` : `Scene ${i + 1} — ${k(i)}`,
+    keywords: kws.slice(i, i + 3),
+  }));
+
+  const scriptBody = sceneTexts.join("\n\n");
 
   const [updated] = await db.update(projectsTable).set({
     status: "scripting",
-    script: `${hook}\n\n${body}\n\n${cta}`,
-    hook, cta, scenes,
+    script: scriptBody,
+    hook:   sceneTexts[0],
+    cta:    null,                       // no forced CTA
+    scenes: JSON.stringify(scenes),
     keywords: JSON.stringify(kws),
     updatedAt: new Date(),
   }).where(eq(projectsTable.id, id)).returning();
@@ -516,6 +606,7 @@ router.post("/projects/:id/generate-script", async (req, res): Promise<void> => 
 
 // ---------------------------------------------------------------------------
 // Pipeline: Generate Assets
+// Picks numClips assets based on video duration
 // ---------------------------------------------------------------------------
 router.post("/projects/:id/generate-assets", async (req, res): Promise<void> => {
   const id = parseInt(req.params.id, 10);
@@ -523,10 +614,13 @@ router.post("/projects/:id/generate-assets", async (req, res): Promise<void> => 
   const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, id));
   if (!project) { res.status(404).json({ error: "Not found" }); return; }
 
+  const totalSecs = parseDuration(project.duration ?? "60s");
+  const { numClips } = getClipConfig(totalSecs);
+
   const category = detectCategory(project.title, project.topic, project.niche);
   const kws      = extractKeywords(project.title, project.topic, project.niche);
   const pool     = MIXKIT_VIDEOS[category] ?? MIXKIT_VIDEOS.default;
-  const ids      = randomPick(pool, 4);
+  const ids      = randomPick(pool, numClips);
 
   const assets = JSON.stringify(ids.map((mixkitId, i) => ({
     id: i + 1, type: "video", mixkitId,
@@ -581,6 +675,11 @@ router.post("/projects/:id/render", async (req, res): Promise<void> => {
   try { assets = JSON.parse(project.assets ?? "[]"); } catch (_) {}
   try { scenes = JSON.parse(project.scenes ?? "[]"); } catch (_) {}
 
+  if (assets.length === 0) {
+    res.status(400).json({ error: "No assets available. Run generate-assets first." });
+    return;
+  }
+
   // Resolve music URL
   const bodyMusicId = typeof req.body?.musicTrackId === "number" ? req.body.musicTrackId : null;
   const category    = detectCategory(project.title, project.topic, project.niche);
@@ -588,7 +687,11 @@ router.post("/projects/:id/render", async (req, res): Promise<void> => {
     ? mixkitMusicUrl(bodyMusicId)
     : (project.voiceoverUrl ?? mixkitMusicUrl(MUSIC_BY_CATEGORY[category] ?? 738));
 
-  // Render options from request body
+  // Duration-based clip timing
+  const totalSecs = parseDuration(project.duration ?? "60s");
+  const { numClips, clipDur } = getClipConfig(totalSecs);
+  const clipsToUse = Math.min(assets.length, numClips);
+
   const opts: RenderOptions = {
     showTitle:        req.body?.showTitle        === true,
     showCaptions:     req.body?.showCaptions     === true,
@@ -596,6 +699,8 @@ router.post("/projects/:id/render", async (req, res): Promise<void> => {
       ? req.body.transitionEffect : "xfade",
     addSfx:           req.body?.addSfx           === true,
     musicTrackId:     bodyMusicId ?? undefined,
+    aspectRatio:      project.aspectRatio ?? "16:9",
+    clipDur,
   };
 
   const [updated] = await db.update(projectsTable).set({
@@ -606,8 +711,9 @@ router.post("/projects/:id/render", async (req, res): Promise<void> => {
 
   res.json(serializeProject(updated));
 
-  // Background FFmpeg render (non-blocking)
-  renderProject(id, project.title, assets, musicUrl, scenes, opts).catch(() => {});
+  // Background FFmpeg render — errors are logged and stored as status "error"
+  renderProject(id, project.title, assets.slice(0, clipsToUse), musicUrl, scenes, opts)
+    .catch(() => {});
 });
 
 // ---------------------------------------------------------------------------

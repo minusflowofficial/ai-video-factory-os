@@ -25,6 +25,7 @@ export function StatusBadge({ status, className }: StatusBadgeProps) {
     case "completed":
       cls += "bg-emerald-50 text-emerald-700"; break;
     case "failed":
+    case "error":
       cls += "bg-red-50 text-red-700"; break;
     case "processing":
     case "pending":

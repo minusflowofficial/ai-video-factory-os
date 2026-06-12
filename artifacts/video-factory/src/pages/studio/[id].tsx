@@ -51,7 +51,8 @@ interface RenderOpts {
   addSfx:           boolean;
 }
 
-const PIPELINE_STEPS = ["Generating script", "Fetching assets", "Matching music", "Rendering video"];
+const SCRIPTED_STEPS    = ["Generating script", "Fetching assets", "Matching music", "Rendering video"];
+const SATISFYING_STEPS  = ["Fetching assets", "Matching music", "Rendering video"];
 
 // ── Toggle component ───────────────────────────────────────────────────────
 function Toggle({ value, onChange }: { value: boolean; onChange(v: boolean): void }) {
@@ -110,6 +111,9 @@ export default function StudioEditor() {
     addSfx:           false,
   });
 
+  // Music+visuals only — no text overlays. Skips script generation step.
+  const isSatisfyingMode = !renderOpts.showTitle && !renderOpts.showCaptions;
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const initRef  = useRef<number | null>(null);
 
@@ -121,7 +125,7 @@ export default function StudioEditor() {
   }, [project]);
 
   useEffect(() => {
-    if (project?.status === "completed" && isAutoRunning) {
+    if ((project?.status === "completed" || project?.status === "error") && isAutoRunning) {
       setIsAutoRunning(false);
       setAutoStep(-1);
     }
@@ -152,6 +156,28 @@ export default function StudioEditor() {
     });
   };
 
+  // ── Shared render fetch ───────────────────────────────────────────────────
+  const doRender = () => {
+    fetch(`/api/projects/${id}/render`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        musicTrackId:     selectedTrack ?? 738,
+        showTitle:        renderOpts.showTitle,
+        showCaptions:     renderOpts.showCaptions,
+        transitionEffect: renderOpts.transitionEffect,
+        addSfx:           renderOpts.addSfx,
+      }),
+    })
+      .then(r => r.json())
+      .then(data => setCache(data))
+      .catch(() => {
+        setRenderError("Render failed. Please try again.");
+        setIsAutoRunning(false);
+        setAutoStep(-1);
+      });
+  };
+
   // ── Auto-pipeline ─────────────────────────────────────────────────────────
   const handleGenerateAll = () => {
     setIsAutoRunning(true);
@@ -159,49 +185,40 @@ export default function StudioEditor() {
     setPreviewClip(null);
     setRenderError(null);
 
-    genScript.mutate({ id }, {
-      onSuccess: (d) => {
-        setCache(d);
-        setLocalScript(d.script || "");
-        setAutoStep(1);
+    const runAssetsAndRender = (stepOffset: number) => {
+      genAssets.mutate({ id }, {
+        onSuccess: (d) => {
+          setCache(d);
+          setAutoStep(stepOffset + 1);
 
-        genAssets.mutate({ id }, {
-          onSuccess: (d) => {
-            setCache(d);
-            setAutoStep(2);
+          genVoice.mutate({ id }, {
+            onSuccess: (d) => {
+              setCache(d);
+              setAutoStep(stepOffset + 2);
+              doRender();
+            },
+            onError: () => { setIsAutoRunning(false); setAutoStep(-1); },
+          });
+        },
+        onError: () => { setIsAutoRunning(false); setAutoStep(-1); },
+      });
+    };
 
-            genVoice.mutate({ id }, {
-              onSuccess: (d) => {
-                setCache(d);
-                setAutoStep(3);
-
-                fetch(`/api/projects/${id}/render`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    musicTrackId:     selectedTrack ?? 738,
-                    showTitle:        renderOpts.showTitle,
-                    showCaptions:     renderOpts.showCaptions,
-                    transitionEffect: renderOpts.transitionEffect,
-                    addSfx:           renderOpts.addSfx,
-                  }),
-                })
-                  .then(r => r.json())
-                  .then(data => setCache(data))
-                  .catch(() => {
-                    setRenderError("Render failed. Please try again.");
-                    setIsAutoRunning(false);
-                    setAutoStep(-1);
-                  });
-              },
-              onError: () => { setIsAutoRunning(false); setAutoStep(-1); },
-            });
-          },
-          onError: () => { setIsAutoRunning(false); setAutoStep(-1); },
-        });
-      },
-      onError: () => { setIsAutoRunning(false); setAutoStep(-1); },
-    });
+    if (isSatisfyingMode) {
+      // Satisfying / music-only: skip script generation
+      runAssetsAndRender(0);
+    } else {
+      // Scripted: generate script first
+      genScript.mutate({ id }, {
+        onSuccess: (d) => {
+          setCache(d);
+          setLocalScript(d.script || "");
+          setAutoStep(1);
+          runAssetsAndRender(1);
+        },
+        onError: () => { setIsAutoRunning(false); setAutoStep(-1); },
+      });
+    }
   };
 
   // ── Re-render only (no pipeline) ─────────────────────────────────────────
@@ -272,8 +289,10 @@ export default function StudioEditor() {
 
   const isCompleted  = project.status === "completed";
   const isRendering  = project.status === "rendering";
+  const isError      = project.status === "error";
   const isRunning    = isAutoRunning || isRendering;
   const renderPct    = project.renderProgress ?? 0;
+  const PIPELINE_STEPS = isSatisfyingMode ? SATISFYING_STEPS : SCRIPTED_STEPS;
 
   const rawVideoUrl  = project.videoUrl ?? null;
   const finalVideoUrl = previewClip
@@ -301,13 +320,19 @@ export default function StudioEditor() {
             <span className="font-semibold text-gray-900 text-sm truncate">{project.title}</span>
             <StatusBadge status={project.status} />
           </div>
-          {isCompleted && !isRunning && (
+          {(isCompleted || isError) && !isRunning && (
             <button
               onClick={handleRerender}
-              className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1 mr-1"
+              className={cn(
+                "text-xs flex items-center gap-1 mr-1",
+                isError
+                  ? "text-red-500 hover:text-red-700 font-medium"
+                  : "text-gray-500 hover:text-gray-700",
+              )}
               title="Re-render with current options"
             >
-              <RefreshCw className="w-3.5 h-3.5" /> Re-render
+              <RefreshCw className="w-3.5 h-3.5" />
+              {isError ? "Retry render" : "Re-render"}
             </button>
           )}
           <Button
@@ -372,24 +397,40 @@ export default function StudioEditor() {
             {/* Script header */}
             <div className="shrink-0 h-10 flex items-center justify-between px-4 border-b border-gray-100 bg-white">
               <span className="text-xs font-semibold text-gray-700 flex items-center gap-1.5">
-                <FileText className="w-3.5 h-3.5 text-gray-400" /> Script
+                <FileText className="w-3.5 h-3.5 text-gray-400" />
+                {isSatisfyingMode ? "Music & Visuals" : "Script"}
               </span>
-              <button
-                onClick={() => updateProject.mutate({ id, data: { script: localScript } }, { onSuccess: setCache })}
-                disabled={updateProject.isPending}
-                className="text-xs text-amber-600 hover:text-amber-700 font-medium flex items-center gap-1"
-              >
-                {updateProject.isPending && <RefreshCw className="w-3 h-3 animate-spin" />}
-                Save
-              </button>
+              {!isSatisfyingMode && (
+                <button
+                  onClick={() => updateProject.mutate({ id, data: { script: localScript } }, { onSuccess: setCache })}
+                  disabled={updateProject.isPending}
+                  className="text-xs text-amber-600 hover:text-amber-700 font-medium flex items-center gap-1"
+                >
+                  {updateProject.isPending && <RefreshCw className="w-3 h-3 animate-spin" />}
+                  Save
+                </button>
+              )}
             </div>
 
-            <textarea
-              value={localScript}
-              onChange={e => setLocalScript(e.target.value)}
-              placeholder={isRunning ? "Generating script…" : "Click 'Generate Video' or type your script here…"}
-              className="flex-1 w-full resize-none bg-white text-gray-800 p-4 text-sm leading-relaxed focus:outline-none placeholder:text-gray-300 font-mono"
-            />
+            {isSatisfyingMode ? (
+              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-gradient-to-b from-white to-blue-50/30">
+                <Music2 className="w-10 h-10 text-blue-300 mb-3" />
+                <p className="text-sm font-semibold text-gray-700 mb-1">Music & Visuals only</p>
+                <p className="text-xs text-gray-400 max-w-[220px] leading-relaxed">
+                  No script needed. The video will be pure visuals with background music and smooth Ken Burns transitions.
+                </p>
+                <p className="text-[10px] text-blue-500 mt-3 border border-blue-100 bg-blue-50 rounded-full px-3 py-1">
+                  Switch to Scripted mode to add narration
+                </p>
+              </div>
+            ) : (
+              <textarea
+                value={localScript}
+                onChange={e => setLocalScript(e.target.value)}
+                placeholder={isRunning ? "Generating script…" : "Click 'Generate Video' or type your script here…"}
+                className="flex-1 w-full resize-none bg-white text-gray-800 p-4 text-sm leading-relaxed focus:outline-none placeholder:text-gray-300 font-mono"
+              />
+            )}
 
             {/* Keywords */}
             {keywords.length > 0 && (
@@ -738,12 +779,22 @@ export default function StudioEditor() {
                 )}
               </div>
 
+              {/* Error state */}
+              {isError && !previewClip && (
+                <div className="w-full bg-red-50 border border-red-100 rounded-lg px-3 py-2 text-[10px] text-red-700">
+                  <p className="font-semibold">Render failed</p>
+                  <p className="text-red-500 mt-0.5">
+                    Check server logs for details. Click "Retry render" to try again.
+                  </p>
+                </div>
+              )}
+
               {/* Composition details */}
               {isCompleted && !previewClip && isOwnUrl(rawVideoUrl) && (
                 <div className="w-full bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 text-[10px] text-emerald-700">
                   <p className="font-semibold">Real FFmpeg composition</p>
                   <p className="text-emerald-600 mt-0.5">
-                    4 clips · {TRANSITIONS.find(t => t.value === renderOpts.transitionEffect)?.label ?? "transitions"}
+                    {assets.length} clips · {TRANSITIONS.find(t => t.value === renderOpts.transitionEffect)?.label ?? "transitions"}
                     {renderOpts.showTitle    && " · title"}
                     {renderOpts.showCaptions && " · captions"}
                     {renderOpts.addSfx       && " · SFX"}
