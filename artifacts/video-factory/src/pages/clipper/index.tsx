@@ -166,11 +166,20 @@ export default function ClipperPage() {
     setClips([]);
     setExp(null);
     try {
+      // Trim transcript to max 150 segments to avoid 413 payload errors
+      const rawSegs = transcript.transcripts[language]?.custom
+        ?? transcript.transcripts["en"]?.custom
+        ?? [];
+      const trimmedSegs = rawSegs.slice(0, 150);
+      const trimmedTranscripts = {
+        [language]: { custom: trimmedSegs },
+      };
+
       const res = await fetch("/api/clipper/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          transcripts:  transcript.transcripts,
+          transcripts:  trimmedTranscripts,
           videoInfo:    transcript.videoInfo,
           language,
           numClips,
