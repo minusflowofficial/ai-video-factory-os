@@ -1,22 +1,29 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: AI Video Factory OS API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: projects
+    description: Video project operations
+  - name: bulk
+    description: Bulk video job operations
+  - name: settings
+    description: App settings
+  - name: stats
+    description: Dashboard statistics
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,13 +31,544 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /projects:
+    get:
+      operationId: listProjects
+      tags: [projects]
+      summary: List all video projects
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Project"
+    post:
+      operationId: createProject
+      tags: [projects]
+      summary: Create a new video project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectInput"
+      responses:
+        "201":
+          description: Created project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+
+  /projects/{id}:
+    get:
+      operationId: getProject
+      tags: [projects]
+      summary: Get a project by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateProject
+      tags: [projects]
+      summary: Update a project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectUpdate"
+      responses:
+        "200":
+          description: Updated project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+    delete:
+      operationId: deleteProject
+      tags: [projects]
+      summary: Delete a project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /projects/{id}/generate-script:
+    post:
+      operationId: generateScript
+      tags: [projects]
+      summary: Generate script for a project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Script generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+
+  /projects/{id}/generate-assets:
+    post:
+      operationId: generateAssets
+      tags: [projects]
+      summary: Fetch B-roll assets for a project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Assets fetched
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+
+  /projects/{id}/generate-voiceover:
+    post:
+      operationId: generateVoiceover
+      tags: [projects]
+      summary: Generate voiceover for a project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Voiceover generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+
+  /projects/{id}/render:
+    post:
+      operationId: renderProject
+      tags: [projects]
+      summary: Start rendering the final video
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Render started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+
+  /bulk-jobs:
+    get:
+      operationId: listBulkJobs
+      tags: [bulk]
+      summary: List bulk video jobs
+      responses:
+        "200":
+          description: List of bulk jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BulkJob"
+    post:
+      operationId: createBulkJob
+      tags: [bulk]
+      summary: Create a bulk video job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkJobInput"
+      responses:
+        "201":
+          description: Created bulk job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkJob"
+
+  /bulk-jobs/{id}:
+    get:
+      operationId: getBulkJob
+      tags: [bulk]
+      summary: Get a bulk job by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Bulk job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkJob"
+
+  /bulk-jobs/{id}/cancel:
+    post:
+      operationId: cancelBulkJob
+      tags: [bulk]
+      summary: Cancel a bulk job
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkJob"
+
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      summary: Get app settings
+      responses:
+        "200":
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+    patch:
+      operationId: updateSettings
+      tags: [settings]
+      summary: Update app settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SettingsUpdate"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+
+  /stats:
+    get:
+      operationId: getStats
+      tags: [stats]
+      summary: Get dashboard statistics
+      responses:
+        "200":
+          description: Dashboard statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Stats"
+
 components:
   schemas:
     HealthStatus:
       type: object
+      required: [status]
       properties:
         status:
           type: string
-      required:
-        - status
 
+    Project:
+      type: object
+      required: [id, title, status, createdAt]
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        topic:
+          type: ["string", "null"]
+        niche:
+          type: ["string", "null"]
+        duration:
+          type: ["string", "null"]
+        aspectRatio:
+          type: ["string", "null"]
+        captionStyle:
+          type: ["string", "null"]
+        voiceOption:
+          type: ["string", "null"]
+        voiceGender:
+          type: ["string", "null"]
+        voiceLanguage:
+          type: ["string", "null"]
+        aiProvider:
+          type: ["string", "null"]
+        status:
+          type: string
+        script:
+          type: ["string", "null"]
+        hook:
+          type: ["string", "null"]
+        cta:
+          type: ["string", "null"]
+        scenes:
+          type: ["string", "null"]
+        keywords:
+          type: ["string", "null"]
+        assets:
+          type: ["string", "null"]
+        voiceoverUrl:
+          type: ["string", "null"]
+        videoUrl:
+          type: ["string", "null"]
+        thumbnailUrl:
+          type: ["string", "null"]
+        renderProgress:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+        updatedAt:
+          type: ["string", "null"]
+
+    ProjectInput:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        topic:
+          type: string
+        niche:
+          type: string
+        duration:
+          type: string
+        aspectRatio:
+          type: string
+        captionStyle:
+          type: string
+        voiceOption:
+          type: string
+        voiceGender:
+          type: string
+        voiceLanguage:
+          type: string
+        aiProvider:
+          type: string
+
+    ProjectUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+        topic:
+          type: string
+        niche:
+          type: string
+        duration:
+          type: string
+        aspectRatio:
+          type: string
+        captionStyle:
+          type: string
+        voiceOption:
+          type: string
+        voiceGender:
+          type: string
+        voiceLanguage:
+          type: string
+        aiProvider:
+          type: string
+        script:
+          type: string
+        hook:
+          type: string
+        cta:
+          type: string
+        scenes:
+          type: string
+        keywords:
+          type: string
+
+    BulkJob:
+      type: object
+      required: [id, niche, totalVideos, status, createdAt]
+      properties:
+        id:
+          type: integer
+        niche:
+          type: string
+        goal:
+          type: ["string", "null"]
+        totalVideos:
+          type: integer
+        pendingCount:
+          type: integer
+        processingCount:
+          type: integer
+        completedCount:
+          type: integer
+        failedCount:
+          type: integer
+        status:
+          type: string
+        createdAt:
+          type: string
+        updatedAt:
+          type: ["string", "null"]
+
+    BulkJobInput:
+      type: object
+      required: [niche, totalVideos]
+      properties:
+        niche:
+          type: string
+        goal:
+          type: string
+        totalVideos:
+          type: integer
+        duration:
+          type: string
+        aspectRatio:
+          type: string
+
+    Settings:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: integer
+        geminiKeySet:
+          type: boolean
+        openaiKeySet:
+          type: boolean
+        claudeKeySet:
+          type: boolean
+        groqKeySet:
+          type: boolean
+        pexelsKeySet:
+          type: boolean
+        pixabayKeySet:
+          type: boolean
+        unsplashKeySet:
+          type: boolean
+        defaultAiProvider:
+          type: ["string", "null"]
+        defaultDuration:
+          type: ["string", "null"]
+        defaultAspectRatio:
+          type: ["string", "null"]
+        storageProvider:
+          type: ["string", "null"]
+        updatedAt:
+          type: ["string", "null"]
+
+    SettingsUpdate:
+      type: object
+      properties:
+        geminiKey:
+          type: string
+        openaiKey:
+          type: string
+        claudeKey:
+          type: string
+        groqKey:
+          type: string
+        pexelsKey:
+          type: string
+        pixabayKey:
+          type: string
+        unsplashKey:
+          type: string
+        defaultAiProvider:
+          type: string
+        defaultDuration:
+          type: string
+        defaultAspectRatio:
+          type: string
+        storageProvider:
+          type: string
+
+    Stats:
+      type: object
+      required: [totalProjects, completedVideos, processingVideos, totalBulkJobs, recentProjects]
+      properties:
+        totalProjects:
+          type: integer
+        completedVideos:
+          type: integer
+        processingVideos:
+          type: integer
+        totalBulkJobs:
+          type: integer
+        recentProjects:
+          type: array
+          items:
+            $ref: "#/components/schemas/Project"
+        projectsByStatus:
+          type: array
+          items:
+            $ref: "#/components/schemas/StatusCount"
+
+    StatusCount:
+      type: object
+      required: [status, count]
+      properties:
+        status:
+          type: string
+        count:
+          type: integer

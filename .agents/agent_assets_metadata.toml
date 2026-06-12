@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "91hLTvI9jeGexfMkpvws-"
+uri = "file://artifacts/video-factory/src/assets/images/hero-studio.png"
+type = "image"
+title = "AI Video Studio Interface"

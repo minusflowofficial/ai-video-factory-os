@@ -1,0 +1,508 @@
+You are an Elite AI Video Automation Architect, SaaS Product Designer, Full-Stack Engineer, Video Production Workflow Expert, and Premium UX Strategist.
+
+Your task is to design and build a production-ready SaaS platform called:
+
+# AI Video Factory OS
+
+A complete AI-powered video creation ecosystem that automatically creates professional videos from a title, topic, keyword, or niche.
+
+This must NOT feel like a simple AI tool.
+
+This must feel like:
+
+👉 Runway + Pictory + CapCut AI + InVideo + Canva AI combined into one platform.
+
+---
+
+# CORE OBJECTIVE
+
+The user provides:
+
+* Title
+  OR
+* Topic
+  OR
+* Niche
+
+The system automatically:
+
+1. Creates script
+2. Creates scene breakdown
+3. Extracts keywords
+4. Fetches B-roll
+5. Creates voiceover
+6. Generates captions
+7. Adds transitions
+8. Adds sound effects
+9. Adds background music
+10. Renders final video
+
+---
+
+# AI PROVIDER SYSTEM
+
+Support:
+
+* Gemini
+* Groq
+* OpenAI
+* Claude
+
+---
+
+# AI FALLBACK LOGIC
+
+Priority:
+
+1. Gemini
+2. OpenAI
+3. Claude
+4. Groq
+
+If one provider fails:
+
+Automatically switch to next provider.
+
+Never stop workflow.
+
+---
+
+# VIDEO CREATION FLOW
+
+STEP 1
+
+User enters:
+
+* Title
+* Topic
+* Niche
+
+---
+
+STEP 2
+
+Select:
+
+Video Duration
+
+Examples:
+
+* 30 Seconds
+* 60 Seconds
+* 90 Seconds
+* 3 Minutes
+* 5 Minutes
+* Custom
+
+---
+
+STEP 3
+
+Select Aspect Ratio
+
+Options:
+
+* 9:16 Shorts
+* 16:9 YouTube
+* 1:1 Square
+* 4:5 Social
+
+---
+
+STEP 4
+
+Caption Style Selection
+
+Create a premium gallery.
+
+Include:
+
+20+ caption styles.
+
+Examples:
+
+* Alex Hormozi
+* Documentary
+* Cinematic
+* Modern Minimal
+* Gaming
+* Luxury
+* News
+* Educational
+* Viral Shorts
+* Neon
+* Subtitle Pro
+
+Every style must include:
+
+* Live preview
+* Animation preview
+* Font preview
+
+---
+
+STEP 5
+
+Voiceover Selection
+
+Options:
+
+* Generate Voiceover
+* Music Only
+* No Voiceover
+
+---
+
+# VOICE ENGINE
+
+Use external TTS repositories.
+
+Support:
+
+* Male
+* Female
+
+Filters:
+
+* Language
+* Country
+* Accent
+
+Controls:
+
+* Speed
+* Pitch
+* Emotion
+* Intensity
+* Volume
+
+Live preview required.
+
+---
+
+# SCRIPT ENGINE
+
+Use selected AI provider.
+
+Generate:
+
+* Hook
+* Body
+* CTA
+* Scene structure
+
+Also generate:
+
+* Visual instructions
+* Emotional tone
+* Music recommendations
+
+---
+
+# KEYWORD ENGINE
+
+Extract:
+
+* Scene keywords
+* Visual keywords
+* Search keywords
+
+for asset discovery.
+
+---
+
+# ASSET DISCOVERY ENGINE
+
+Connect:
+
+* Pexels
+* Pixabay
+* Unsplash
+* Mixkit
+
+---
+
+# ASSET FETCH LOGIC
+
+For every scene:
+
+Generate:
+
+* Visual intent
+* Search keywords
+
+Fetch:
+
+* Videos
+* Images
+
+Match assets to script scenes.
+
+Avoid duplicate assets.
+
+---
+
+# MUSIC ENGINE
+
+Use Mixkit assets.
+
+Automatically determine:
+
+* Emotional tone
+* Energy level
+
+Choose suitable music.
+
+---
+
+# SOUND EFFECT ENGINE
+
+Analyze script.
+
+Add:
+
+* Whoosh
+* Impacts
+* Ambient sounds
+* Dramatic effects
+
+only where relevant.
+
+---
+
+# VIDEO EDITOR ENGINE
+
+Automatically:
+
+* Cut scenes
+* Apply transitions
+* Apply zooms
+* Apply motion effects
+
+---
+
+# CAPTION ENGINE
+
+Generate captions.
+
+Must:
+
+* Sync with voiceover
+* Follow selected style
+* Animate automatically
+
+---
+
+# MAIN DASHBOARD
+
+Create a premium 4-column production studio.
+
+---
+
+COLUMN 1
+
+Production Control Panel
+
+Show:
+
+* Title
+* Duration
+* Ratio
+* Voice settings
+* Generate button
+
+---
+
+COLUMN 2
+
+Script + Keywords
+
+Show:
+
+* Script
+* Scene breakdown
+* Keywords
+
+Editable.
+
+---
+
+COLUMN 3
+
+Voice + Assets
+
+Show:
+
+* Voice preview
+* Audio preview
+* B-roll assets
+* Image assets
+
+User can replace assets.
+
+---
+
+COLUMN 4
+
+Final Output
+
+Show:
+
+Portrait Preview
+
+Landscape Preview
+
+Download buttons
+
+Render status
+
+---
+
+# BULK VIDEO FACTORY
+
+Create dedicated Bulk Mode.
+
+User provides:
+
+* Niche
+* Goal
+* Number of videos
+
+Examples:
+
+50 videos
+100 videos
+500 videos
+
+---
+
+# BULK SYSTEM
+
+Automatically:
+
+* Generate titles
+* Generate scripts
+* Generate assets
+* Generate voiceovers
+* Generate captions
+* Render videos
+
+Continuously.
+
+---
+
+# BULK JOB QUEUE
+
+Show:
+
+* Pending
+* Processing
+* Completed
+* Failed
+
+Progress for every video.
+
+---
+
+# STORAGE SYSTEM
+
+Support:
+
+* Supabase Storage
+* Google Drive
+
+---
+
+# PROJECT MANAGEMENT
+
+Save:
+
+* Scripts
+* Assets
+* Voiceovers
+* Videos
+
+History section required.
+
+---
+
+# PROJECT VIEW
+
+Each project should contain:
+
+* Script
+* Keywords
+* Assets
+* Audio
+* Final video
+
+Everything should be replayable.
+
+---
+
+# SETTINGS
+
+Include:
+
+AI Keys
+
+* Gemini
+* Groq
+* OpenAI
+* Claude
+
+Assets Keys
+
+* Pexels
+* Pixabay
+* Unsplash
+
+Storage
+
+* Supabase
+* Google Drive
+
+---
+
+# DESIGN STYLE
+
+The UI must feel:
+
+Premium
+Futuristic
+Cinematic
+Enterprise Grade
+
+Use:
+
+* Glassmorphism
+* Dark theme
+* Luxury gradients
+* Smooth animations
+* Modern cards
+
+---
+
+# REQUIRED PAGES
+
+Generate complete pages:
+
+* Home
+* Features
+* Pricing
+* About Us
+* Contact Us
+* Privacy Policy
+* Terms & Conditions
+* Disclaimer
+* DMCA
+
+All pages must be fully designed and content-rich.
+
+---
+
+# FINAL GOAL
+
+Create a platform where a user can enter a niche once and continuously generate high-quality videos with minimal manual work.
+
+This must feel like a startup-grade AI Video Production Operating System rather than a simple video generator.
