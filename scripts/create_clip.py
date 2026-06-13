@@ -11,7 +11,10 @@ Features:
   - Sizes are pixel-accurate (PlayResX/Y = actual video resolution)
 """
 
-import sys, json, subprocess, os
+import sys, json, subprocess, os, pathlib
+
+# Directory containing bundled fonts (NotoSansCJKjp-Regular.otf for CJK support)
+FONTS_DIR = str(pathlib.Path(__file__).parent / "fonts")
 
 try:
     import cv2
@@ -148,9 +151,9 @@ def make_ass(captions, hook, clip_duration, target_w, target_h, cap_style):
         f"OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
         f"ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         f"Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: HookTop,Arial,{hook_fs},&H00FFFFFF,&H000000FF,&H00000000,"
+        f"Style: HookTop,Noto Sans CJK JP,{hook_fs},&H00FFFFFF,&H000000FF,&H00000000,"
         f"&H00000000,1,0,0,0,100,100,1,0,1,5,1,8,50,50,{top_mg},1\n"
-        f"Style: Caption,Arial,{cap_fs},{pri},&H000000FF,{out_c},{back},"
+        f"Style: Caption,Noto Sans CJK JP,{cap_fs},{pri},&H000000FF,{out_c},{back},"
         f"1,0,0,0,100,100,0,0,{bstyle},{outline_w},{shadow},2,50,50,{bot_mg},1\n\n"
         f"[Events]\n"
         f"Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
@@ -209,10 +212,11 @@ def encode_crop(raw_clip, out_path, cx, cy, crop_w, crop_h,
         cropped,
     ], check=True, capture_output=True)
 
-    safe_ass = ass_path.replace("\\", "/").replace(":", "\\:")
+    safe_ass   = ass_path.replace("\\", "/").replace(":", "\\:")
+    safe_fonts = FONTS_DIR.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
     subprocess.run([
         "ffmpeg", "-y", "-i", cropped,
-        "-vf", f"subtitles={safe_ass}",
+        "-vf", f"subtitles={safe_ass}:fontsdir={safe_fonts}",
         "-c:v", "libx264", "-c:a", "aac",
         "-preset", "ultrafast", "-crf", "26", "-threads", "0",
         out_path,
