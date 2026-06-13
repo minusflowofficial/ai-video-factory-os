@@ -1,13 +1,16 @@
 /**
  * Clipper pipeline
  *
- * POST /api/clipper/upload            — upload a local video file → { filePath }
- * POST /api/clipper/process           — start full pipeline (YouTube URL)
- * POST /api/clipper/process-local     — start pipeline from uploaded file
- * GET  /api/clipper/status/:jobId     — poll job progress + clip results
- * GET  /api/clipper/download/:token   — download a generated clip
- * GET  /api/clipper/cookies-status    — check cookies.txt
- * POST /api/clipper/save-cookies      — save Netscape cookies content
+ * POST /api/clipper/upload              — upload a local video file → { filePath }
+ * POST /api/clipper/process             — start full pipeline (YouTube URL)
+ * POST /api/clipper/process-local       — start pipeline from uploaded file
+ * GET  /api/clipper/status/:jobId       — poll job progress + clip results
+ * GET  /api/clipper/download/:token     — download a generated clip
+ * GET  /api/clipper/preview/:token      — inline video preview
+ * GET  /api/clipper/history             — list past sessions from DB
+ * GET  /api/clipper/cookies-status      — check cookies.txt
+ * POST /api/clipper/save-cookies        — save Netscape cookies content
+ * GET  /api/pixabay/search              — search Pixabay for stock footage/images
  */
 
 import { Router, type IRouter } from "express";
@@ -17,6 +20,8 @@ import { execFile, spawn } from "child_process";
 import { promisify } from "util";
 import * as crypto from "crypto";
 import multer from "multer";
+import { db, clipperHistoryTable } from "@workspace/db";
+import { desc } from "drizzle-orm";
 
 const execFileAsync = promisify(execFile);
 const router: IRouter = Router();
@@ -41,6 +46,7 @@ interface ClipResult {
   viralScore: number; startTime: string; endTime: string; duration: string;
   status: "pending" | "processing" | "done" | "error";
   downloadToken?: string; sizeMb?: number; error?: string;
+  suggestedTitle?: string; hashtags?: string[]; description?: string;
 }
 interface ClipJob {
   id: string;
@@ -48,6 +54,9 @@ interface ClipJob {
   stepLabel: string; progress: number;
   clips: ClipResult[]; totalClips: number; doneClips: number;
   videoTitle?: string; error?: string; createdAt: number; dir: string;
+  // history metadata
+  sourceType?: string; sourceUrl?: string; filename?: string;
+  aspectRatio?: string; captionStyle?: string;
 }
 
 // ── In-memory stores ──────────────────────────────────────────────────────────
@@ -297,11 +306,11 @@ Return ONLY a JSON array (no other text):
   });
 }
 
-// ── Create a single clip ──────────────────────────────────────────────────────
+// ── Create a single clip (returns 1 or 2 outputs when face-split occurs) ──────
 async function createClip(
   clip: any, videoPath: string, segments: any[], aspectRatio: string,
   captionStyle: string, outDir: string,
-): Promise<{ downloadToken: string; sizeMb: number }> {
+): Promise<Array<{ downloadToken: string; sizeMb: number; faceZone?: string }>> {
   const startSec = timeStrToSeconds(clip.startTime);
   const endSec   = timeStrToSeconds(clip.endTime);
 
@@ -335,9 +344,16 @@ async function createClip(
   const result = JSON.parse(stdout.trim());
   if (!result.ok) throw new Error(result.error ?? "Clip creation failed");
 
-  const token = crypto.randomUUID();
-  downloadTokens.set(token, { filePath: outPath, expiresAt: Date.now() + 4 * 60 * 60_000 });
-  return { downloadToken: token, sizeMb: result.size_mb };
+  // Python always returns `outputs` array (may have 2 items for face-split clips)
+  const pyOutputs = (result.outputs ?? [{ output: result.output, size_mb: result.size_mb, face_zone: "full" }]) as
+    Array<{ output: string; size_mb: number; face_zone?: string }>;
+
+  const TTL = Date.now() + 4 * 60 * 60_000;
+  return pyOutputs.map(o => {
+    const token = crypto.randomUUID();
+    downloadTokens.set(token, { filePath: o.output, expiresAt: TTL });
+    return { downloadToken: token, sizeMb: o.size_mb, faceZone: o.face_zone };
+  });
 }
 
 // ── Full pipeline (shared by URL and local file paths) ────────────────────────
@@ -403,13 +419,32 @@ async function runPipeline(job: ClipJob, opts: {
         if (!jobClip) return;
         jobClip.status = "processing";
         try {
-          const { downloadToken, sizeMb } = await createClip(
+          const results = await createClip(
             aiClip, videoPath, segments, aspectRatio, captionStyle, job.dir,
           );
+
+          // Primary output (always index 0)
           jobClip.status        = "done";
-          jobClip.downloadToken = downloadToken;
-          jobClip.sizeMb        = sizeMb;
+          jobClip.downloadToken = results[0].downloadToken;
+          jobClip.sizeMb        = results[0].sizeMb;
           job.doneClips++;
+
+          // If face-split produced a second crop, inject a bonus clip entry
+          if (results.length > 1) {
+            const extra: ClipResult = {
+              ...jobClip,
+              id:            jobClip.id + 1000 + i,
+              title:         `${jobClip.title} — Zone B`,
+              suggestedTitle: jobClip.suggestedTitle ? `${jobClip.suggestedTitle} (B)` : undefined,
+              status:        "done",
+              downloadToken: results[1].downloadToken,
+              sizeMb:        results[1].sizeMb,
+            };
+            job.clips.push(extra);
+            job.doneClips++;
+            job.totalClips++;
+          }
+
           job.progress = Math.min(98, 52 + Math.round((job.doneClips / job.totalClips) * 46));
         } catch (err: any) {
           jobClip.status = "error";
@@ -421,6 +456,27 @@ async function runPipeline(job: ClipJob, opts: {
     job.status    = "done";
     job.progress  = 100;
     job.stepLabel = `Done — ${job.doneClips} clip${job.doneClips !== 1 ? "s" : ""} ready`;
+
+    // 6. Persist history to DB (non-fatal)
+    try {
+      await db.insert(clipperHistoryTable).values({
+        jobId:        job.id,
+        sourceType:   job.sourceType ?? "upload",
+        sourceUrl:    job.sourceUrl  ?? null,
+        filename:     job.filename   ?? null,
+        aspectRatio:  job.aspectRatio  ?? aspectRatio,
+        captionStyle: job.captionStyle ?? captionStyle,
+        numClips:     job.totalClips,
+        doneClips:    job.doneClips,
+        status:       "done",
+        clipsJson:    JSON.stringify(job.clips.map(c => ({
+          id: c.id, title: c.title, hook: c.hook, hookType: c.hookType,
+          viralScore: c.viralScore, startTime: c.startTime, endTime: c.endTime,
+          duration: c.duration, suggestedTitle: c.suggestedTitle,
+          hashtags: c.hashtags, description: c.description,
+        }))),
+      }).onConflictDoNothing();
+    } catch { /* ignore DB errors */ }
   } catch (err: any) {
     job.status    = "error";
     job.error     = err.message ?? "Pipeline failed";
@@ -467,7 +523,11 @@ router.post("/clipper/process", async (req, res): Promise<void> => {
   const jobId = crypto.randomUUID();
   const dir   = `/tmp/clipper-job-${jobId}`;
   await fs.promises.mkdir(dir, { recursive: true });
-  const job: ClipJob = { id: jobId, status: "queued", stepLabel: "Starting…", progress: 0, clips: [], totalClips: 0, doneClips: 0, createdAt: Date.now(), dir };
+  const job: ClipJob = {
+    id: jobId, status: "queued", stepLabel: "Starting…", progress: 0,
+    clips: [], totalClips: 0, doneClips: 0, createdAt: Date.now(), dir,
+    sourceType: "youtube", sourceUrl: String(url), aspectRatio, captionStyle,
+  };
   jobs.set(jobId, job);
   runPipeline(job, { videoId, numClips, aspectRatio, captionStyle, hookFilter, minDuration, maxDuration }).catch(() => {});
   res.json({ jobId });
@@ -475,7 +535,7 @@ router.post("/clipper/process", async (req, res): Promise<void> => {
 
 // POST /api/clipper/process-local — uploaded file pipeline
 router.post("/clipper/process-local", async (req, res): Promise<void> => {
-  const { filePath, videoTitle, numClips = 5, aspectRatio = "9:16", captionStyle = "Bold Yellow", hookFilter = null, minDuration = 30, maxDuration = 90 } = req.body ?? {};
+  const { filePath, videoTitle, filename, numClips = 5, aspectRatio = "9:16", captionStyle = "Bold Yellow", hookFilter = null, minDuration = 30, maxDuration = 90 } = req.body ?? {};
   if (!filePath) { res.status(400).json({ error: "filePath required" }); return; }
   if (!fs.existsSync(filePath)) { res.status(400).json({ error: "File not found" }); return; }
 
@@ -486,6 +546,8 @@ router.post("/clipper/process-local", async (req, res): Promise<void> => {
     id: jobId, status: "queued", stepLabel: "Starting…", progress: 0,
     clips: [], totalClips: 0, doneClips: 0, createdAt: Date.now(), dir,
     videoTitle: videoTitle ?? "Uploaded Video",
+    sourceType: "upload", filename: filename ?? videoTitle ?? "video.mp4",
+    aspectRatio, captionStyle,
   };
   jobs.set(jobId, job);
   runPipeline(job, { localVideoPath: filePath, numClips, aspectRatio, captionStyle, hookFilter, minDuration, maxDuration }).catch(() => {});
@@ -541,6 +603,90 @@ router.get("/clipper/download/:token", async (req, res): Promise<void> => {
     res.setHeader("Content-Length", stat.size);
     fs.createReadStream(entry.filePath).pipe(res);
   } catch { res.status(500).json({ error: "File not found" }); }
+});
+
+// GET /api/clipper/history — list past 30 sessions from DB
+router.get("/clipper/history", async (_req, res): Promise<void> => {
+  try {
+    const rows = await db
+      .select()
+      .from(clipperHistoryTable)
+      .orderBy(desc(clipperHistoryTable.createdAt))
+      .limit(30);
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Pixabay search ────────────────────────────────────────────────────────────
+// GET /api/pixabay/search?q=ocean&type=video&page=1&per_page=12
+router.get("/pixabay/search", async (req, res): Promise<void> => {
+  const apiKey = process.env.PIXABAY_API_KEY;
+  if (!apiKey) {
+    res.status(503).json({ error: "PIXABAY_API_KEY not configured" });
+    return;
+  }
+
+  const q        = String(req.query.q    ?? "nature");
+  const type     = String(req.query.type ?? "video");   // "video" | "photo"
+  const page     = Number(req.query.page    ?? 1);
+  const perPage  = Number(req.query.per_page ?? 12);
+  const category = req.query.category ? String(req.query.category) : undefined;
+
+  try {
+    const base = type === "video"
+      ? "https://pixabay.com/api/videos/"
+      : "https://pixabay.com/api/";
+
+    const params = new URLSearchParams({
+      key:        apiKey,
+      q,
+      page:       String(page),
+      per_page:   String(Math.min(50, Math.max(3, perPage))),
+      safesearch: "true",
+      ...(category ? { category } : {}),
+    });
+
+    const r = await fetch(`${base}?${params}`);
+    if (!r.ok) {
+      res.status(r.status).json({ error: `Pixabay API error ${r.status}` });
+      return;
+    }
+    const data = await r.json() as any;
+
+    // Normalise so the client always gets {hits, totalHits, type}
+    const hits = (data.hits ?? []).map((h: any) =>
+      type === "video"
+        ? {
+            id:          h.id,
+            tags:        h.tags,
+            duration:    h.duration,
+            thumbnail:   h.videos?.medium?.thumbnail ?? h.userImageURL,
+            previewURL:  h.videos?.tiny?.url  ?? h.videos?.small?.url,
+            downloadURL: h.videos?.medium?.url ?? h.videos?.large?.url,
+            width:       h.videos?.medium?.width,
+            height:      h.videos?.medium?.height,
+            user:        h.user,
+            type:        "video",
+          }
+        : {
+            id:          h.id,
+            tags:        h.tags,
+            thumbnail:   h.webformatURL,
+            downloadURL: h.largeImageURL,
+            previewURL:  h.webformatURL,
+            width:       h.webformatWidth,
+            height:      h.webformatHeight,
+            user:        h.user,
+            type:        "photo",
+          }
+    );
+
+    res.json({ hits, totalHits: data.totalHits ?? 0, type });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 export default router;

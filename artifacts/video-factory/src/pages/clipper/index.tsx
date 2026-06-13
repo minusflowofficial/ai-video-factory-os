@@ -6,7 +6,7 @@ import {
   Scissors, Loader2, Download, AlertCircle,
   CheckCircle2, Clock, TrendingUp, Sparkles, Film,
   ChevronDown, ChevronUp, Copy, Check, Cookie,
-  Upload, Link2, X, Play, FileText, Hash,
+  Upload, Link2, X, FileText, Hash, History, RotateCcw,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -15,9 +15,13 @@ interface ClipResult {
   viralScore: number; startTime: string; endTime: string; duration: string;
   status: "pending" | "processing" | "done" | "error";
   downloadToken?: string; sizeMb?: number; error?: string;
-  suggestedTitle?: string;
-  hashtags?: string[];
-  description?: string;
+  suggestedTitle?: string; hashtags?: string[]; description?: string;
+}
+interface HistoryRow {
+  id: number; jobId: string; sourceType: string; sourceUrl: string | null;
+  filename: string | null; aspectRatio: string; captionStyle: string;
+  numClips: number; doneClips: number; status: string; clipsJson: string | null;
+  createdAt: string;
 }
 interface JobStatus {
   id: string;
@@ -90,9 +94,18 @@ export default function ClipperPage() {
   const [cookiesText,  setCookiesText] = useState("");
   const [savingCookies, setSavingCookies] = useState(false);
   const [cookiesSaved,  setCookiesSaved]  = useState(false);
+  const [history,      setHistory]     = useState<HistoryRow[]>([]);
+  const [showHistory,  setShowHistory] = useState(false);
 
   const pollRef    = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInput  = useRef<HTMLInputElement>(null);
+
+  // Load history on mount
+  useEffect(() => {
+    fetch("/api/clipper/history").then(r => r.json()).then(d => {
+      if (Array.isArray(d)) setHistory(d);
+    }).catch(() => {});
+  }, []);
 
   // Poll job status
   useEffect(() => {
@@ -105,6 +118,12 @@ export default function ClipperPage() {
           clearInterval(pollRef.current!);
           if (data.error?.toLowerCase().includes("bot") || data.error?.toLowerCase().includes("cookies")) {
             setShowCookies(true);
+          }
+          // Refresh history after job completes
+          if (data.status === "done") {
+            fetch("/api/clipper/history").then(r => r.json()).then(d => {
+              if (Array.isArray(d)) setHistory(d);
+            }).catch(() => {});
           }
         }
       } catch { /* ignore */ }
@@ -144,7 +163,7 @@ export default function ClipperPage() {
       if (tab === "upload") {
         if (!uploadedFile) { setError("Please upload a video file first."); return; }
         endpoint = "/api/clipper/process-local";
-        body = { filePath: uploadedFile.path, videoTitle: uploadedFile.name, ...opts };
+        body = { filePath: uploadedFile.path, videoTitle: uploadedFile.name, filename: uploadedFile.name, ...opts };
       } else {
         if (!url.trim()) { setError("Please enter a YouTube URL."); return; }
         endpoint = "/api/clipper/process";
@@ -219,6 +238,67 @@ export default function ClipperPage() {
                 className="h-8 px-4 bg-amber-400 hover:bg-amber-500 text-amber-950 font-semibold text-xs">
                 {savingCookies ? "Saving…" : "Save Cookies"}
               </Button>
+            </div>
+          )}
+
+          {/* ── History Panel ── */}
+          {!jobId && history.length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+              <button
+                onClick={() => setShowHistory(v => !v)}
+                className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors">
+                <div className="flex items-center gap-2">
+                  <History className="w-4 h-4 text-amber-500" />
+                  <span className="text-sm font-semibold text-gray-800">Recent Sessions</span>
+                  <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">{history.length}</span>
+                </div>
+                {showHistory ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+              </button>
+              {showHistory && (
+                <div className="border-t border-gray-100 divide-y divide-gray-50">
+                  {history.map(row => {
+                    const date = new Date(row.createdAt);
+                    const label = row.filename ?? row.sourceUrl ?? "Video";
+                    const shortLabel = label.length > 40 ? label.slice(0, 40) + "…" : label;
+                    return (
+                      <div key={row.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors group">
+                        <div className={cn(
+                          "w-7 h-7 rounded-lg flex items-center justify-center shrink-0 text-[10px] font-black",
+                          row.sourceType === "youtube" ? "bg-red-100 text-red-600" : "bg-blue-100 text-blue-600"
+                        )}>
+                          {row.sourceType === "youtube" ? "YT" : "↑"}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-gray-800 truncate">{shortLabel}</p>
+                          <p className="text-[10px] text-gray-400">
+                            {row.doneClips}/{row.numClips} clips · {row.aspectRatio} · {row.captionStyle} ·{" "}
+                            {date.toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          </p>
+                        </div>
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            title="Restore — view past clips info"
+                            onClick={() => {
+                              const clips: ClipResult[] = JSON.parse(row.clipsJson ?? "[]").map((c: any) => ({
+                                ...c, status: "done" as const, downloadToken: undefined, sizeMb: undefined,
+                              }));
+                              setJob({
+                                id: row.jobId, status: "done", stepLabel: "Restored from history",
+                                progress: 100, totalClips: row.numClips, doneClips: row.doneClips,
+                                videoTitle: row.filename ?? undefined, error: undefined, clips,
+                              });
+                              setJobId(row.jobId);
+                              setShowHistory(false);
+                            }}
+                            className="flex items-center gap-1 text-[10px] font-bold text-amber-600 hover:text-amber-800 bg-amber-50 hover:bg-amber-100 px-2 py-1 rounded-lg transition-colors">
+                            <RotateCcw className="w-3 h-3" /> View
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
