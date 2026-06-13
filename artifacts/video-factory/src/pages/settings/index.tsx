@@ -68,11 +68,12 @@ export default function SettingsPage() {
   }
 
   const keys = [
-    { id: "openaiKey",  label: "OpenAI API Key",       isSet: settings?.openaiKeySet,  desc: "GPT-4 for scripting and refinement" },
-    { id: "claudeKey",  label: "Anthropic Claude Key",  isSet: settings?.claudeKeySet,  desc: "Creative ideation and structure" },
-    { id: "geminiKey",  label: "Google Gemini Key",     isSet: settings?.geminiKeySet,  desc: "Fast, cost-effective drafts" },
-    { id: "groqKey",    label: "Groq API Key",          isSet: settings?.groqKeySet,    desc: "Ultra-fast Llama inference" },
-    { id: "pexelsKey",  label: "Pexels API Key",        isSet: settings?.pexelsKeySet,  desc: "Optional — extra B-roll footage" },
+    { id: "openaiKey",   label: "OpenAI API Key",       isSet: settings?.openaiKeySet,   desc: "GPT-4 for scripting and refinement" },
+    { id: "claudeKey",   label: "Anthropic Claude Key",  isSet: settings?.claudeKeySet,   desc: "Creative ideation and structure" },
+    { id: "geminiKey",   label: "Google Gemini Key",     isSet: settings?.geminiKeySet,   desc: "Fast, cost-effective drafts" },
+    { id: "groqKey",     label: "Groq API Key",          isSet: settings?.groqKeySet,     desc: "Ultra-fast Llama inference" },
+    { id: "pexelsKey",   label: "Pexels API Key",        isSet: settings?.pexelsKeySet,   desc: "Optional — extra B-roll footage" },
+    { id: "pixabayKey",  label: "Pixabay API Key",       isSet: settings?.pixabayKeySet,  desc: "Free stock video & image search" },
   ];
 
   return (

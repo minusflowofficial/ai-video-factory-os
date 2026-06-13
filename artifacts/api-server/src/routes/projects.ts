@@ -11,6 +11,14 @@ import {
   UpdateProjectBody,
 } from "@workspace/api-zod";
 import { searchMixkitVideos, searchMixkitMusic } from "../mixkit-search";
+import multer from "multer";
+
+const STUDIO_UPLOADS_DIR = "/tmp/studio-uploads";
+const studioStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => { fs.mkdirSync(STUDIO_UPLOADS_DIR, { recursive: true }); cb(null, STUDIO_UPLOADS_DIR); },
+  filename:    (_req,  file, cb) => { const ext = path.extname(file.originalname) || ".mp4"; cb(null, `${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`); },
+});
+const studioUpload = multer({ storage: studioStorage, limits: { fileSize: 4 * 1024 * 1024 * 1024 } });
 
 const router: IRouter = Router();
 const execFileAsync = promisify(execFile);
@@ -117,10 +125,59 @@ function wrapText(text: string, maxCharsPerLine: number, maxLines: number): stri
 }
 
 // ---------------------------------------------------------------------------
+// Studio video upload + serve
+// ---------------------------------------------------------------------------
+router.post("/studio/upload-video", (req, res, next) => {
+  studioUpload.single("video")(req, res, (err) => {
+    if (err) { res.status(400).json({ error: err.message }); return; }
+    if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return; }
+    const url = `/api/studio/uploads/${req.file.filename}`;
+    res.json({ url, filename: req.file.filename, sizeMb: +(req.file.size / 1024 / 1024).toFixed(1) });
+  });
+});
+
+router.get("/studio/uploads/:filename", async (req, res): Promise<void> => {
+  const filename = path.basename(req.params.filename);
+  const filePath = path.join(STUDIO_UPLOADS_DIR, filename);
+  try {
+    const stat = await fs.promises.stat(filePath);
+    const range = req.headers.range;
+    if (range) {
+      const [s, e] = range.replace(/bytes=/, "").split("-");
+      const start = parseInt(s, 10);
+      const end   = e ? parseInt(e, 10) : stat.size - 1;
+      res.status(206);
+      res.setHeader("Content-Range",  `bytes ${start}-${end}/${stat.size}`);
+      res.setHeader("Accept-Ranges",  "bytes");
+      res.setHeader("Content-Length", end - start + 1);
+      res.setHeader("Content-Type",   "video/mp4");
+      fs.createReadStream(filePath, { start, end }).pipe(res);
+    } else {
+      res.setHeader("Content-Type",   "video/mp4");
+      res.setHeader("Content-Length", stat.size);
+      res.setHeader("Accept-Ranges",  "bytes");
+      fs.createReadStream(filePath).pipe(res);
+    }
+  } catch {
+    res.status(404).json({ error: "File not found" });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Download helper (server-side)
 // ---------------------------------------------------------------------------
 async function downloadFile(url: string, dest: string): Promise<void> {
-  const res = await fetch(url, {
+  // Handle relative API paths by converting to localhost absolute URL
+  const absoluteUrl = url.startsWith("/")
+    ? `http://localhost:${process.env.PORT ?? 8080}${url}`
+    : url;
+  // Handle local studio uploads by direct file copy (avoids HTTP overhead)
+  if (url.startsWith("/api/studio/uploads/")) {
+    const filename = path.basename(url);
+    await fs.promises.copyFile(path.join(STUDIO_UPLOADS_DIR, filename), dest);
+    return;
+  }
+  const res = await fetch(absoluteUrl, {
     headers: {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
       Referer: "https://mixkit.co/",

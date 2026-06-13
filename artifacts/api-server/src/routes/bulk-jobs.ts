@@ -31,8 +31,8 @@ router.post("/bulk-jobs", async (req, res): Promise<void> => {
     status: "pending",
   }).returning();
 
-  // Simulate processing
-  simulateBulkProgress(job.id, parsed.data.totalVideos);
+  // Kick off real video pipeline in background
+  runBulkPipeline(job.id, parsed.data.niche, parsed.data.totalVideos, parsed.data.aspectRatio ?? "9:16").catch(() => {});
 
   res.status(201).json(serializeBulkJob(job));
 });
@@ -70,27 +70,112 @@ router.post("/bulk-jobs/:id/cancel", async (req, res): Promise<void> => {
   res.json(serializeBulkJob(job));
 });
 
-async function simulateBulkProgress(jobId: number, total: number) {
-  const batchSize = Math.max(1, Math.floor(total / 10));
-  let completed = 0;
-  const interval = setInterval(async () => {
+// ── Real bulk video pipeline ──────────────────────────────────────────────────
+async function runBulkPipeline(jobId: number, niche: string, totalVideos: number, aspectRatio: string) {
+  const PORT = process.env.PORT ?? 8080;
+  const BASE = `http://localhost:${PORT}`;
+  const CONCURRENCY = 2;
+
+  await db.update(bulkJobsTable).set({
+    status: "processing",
+    processingCount: Math.min(CONCURRENCY, totalVideos),
+    updatedAt: new Date(),
+  }).where(eq(bulkJobsTable.id, jobId));
+
+  let completedCount = 0;
+  let failedCount = 0;
+
+  const processOne = async (videoNum: number) => {
+    // Check for cancellation
     const [current] = await db.select().from(bulkJobsTable).where(eq(bulkJobsTable.id, jobId));
-    if (!current || current.status === "cancelled") {
-      clearInterval(interval);
-      return;
+    if (!current || current.status === "cancelled") return;
+
+    try {
+      // 1. Create project
+      const createRes = await fetch(`${BASE}/api/projects`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: `${niche} #${videoNum}`,
+          topic: niche,
+          niche,
+          duration: "60s",
+          aspectRatio,
+          captionStyle: "Bold Yellow",
+        }),
+      });
+      if (!createRes.ok) throw new Error("project create failed");
+      const project = await createRes.json();
+      const pid = project.id;
+
+      // 2. Generate assets
+      await fetch(`${BASE}/api/projects/${pid}/generate-assets`, { method: "POST" });
+
+      // 3. Select music
+      await fetch(`${BASE}/api/projects/${pid}/generate-voiceover`, { method: "POST" });
+
+      // 4. Kick off render
+      await fetch(`${BASE}/api/projects/${pid}/render`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          showCaptions: false,
+          showTitle: false,
+          transitionEffect: "zoom",
+          addSfx: false,
+        }),
+      });
+
+      // 5. Poll until render finishes (max ~8 min)
+      const RUNNING_STATUSES = new Set(["rendering", "scripting", "fetching-assets", "voiceover", "assets-ready", "music-ready", "processing"]);
+      let attempts = 0;
+      let finalStatus = "rendering";
+      while (RUNNING_STATUSES.has(finalStatus) && attempts < 96) {
+        await new Promise(r => setTimeout(r, 5000));
+        const statusRes = await fetch(`${BASE}/api/projects/${pid}`);
+        const statusData = await statusRes.json();
+        finalStatus = statusData.status ?? "error";
+        attempts++;
+      }
+
+      if (finalStatus === "completed") completedCount++;
+      else failedCount++;
+    } catch {
+      failedCount++;
     }
-    completed = Math.min(completed + batchSize, total);
-    const remaining = total - completed;
-    const isLast = completed >= total;
+
+    // Update progress in DB
+    const remaining = totalVideos - completedCount - failedCount;
     await db.update(bulkJobsTable).set({
-      status: isLast ? "completed" : "processing",
-      completedCount: completed,
-      pendingCount: remaining,
-      processingCount: isLast ? 0 : Math.min(batchSize, remaining),
+      completedCount,
+      failedCount,
+      pendingCount: Math.max(0, remaining),
+      processingCount: Math.min(CONCURRENCY, remaining),
       updatedAt: new Date(),
     }).where(eq(bulkJobsTable.id, jobId));
-    if (isLast) clearInterval(interval);
-  }, 3000);
+  };
+
+  // Process in batches of CONCURRENCY
+  for (let i = 0; i < totalVideos; i += CONCURRENCY) {
+    const [job] = await db.select().from(bulkJobsTable).where(eq(bulkJobsTable.id, jobId));
+    if (!job || job.status === "cancelled") break;
+
+    const batch = Array.from({ length: Math.min(CONCURRENCY, totalVideos - i) }, (_, k) => i + k + 1);
+    await Promise.all(batch.map(n => processOne(n)));
+  }
+
+  // Mark final status
+  const [finalJob] = await db.select().from(bulkJobsTable).where(eq(bulkJobsTable.id, jobId));
+  if (finalJob && finalJob.status !== "cancelled") {
+    await db.update(bulkJobsTable).set({
+      status: "completed",
+      completedCount,
+      failedCount,
+      pendingCount: 0,
+      processingCount: 0,
+      updatedAt: new Date(),
+    }).where(eq(bulkJobsTable.id, jobId));
+  }
 }
 
 function serializeBulkJob(j: typeof bulkJobsTable.$inferSelect) {

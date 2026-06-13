@@ -11,7 +11,7 @@ import {
   Play, Download, Zap, RefreshCw, FileText, Music2,
   Image as ImageIcon, CheckCircle2, Video, Pause,
   ArrowLeft, Loader2, X, Film, Settings2, Mic,
-  ToggleLeft, ToggleRight,
+  ToggleLeft, ToggleRight, Upload, Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
@@ -127,7 +127,9 @@ export default function StudioEditor() {
     transitionEffect: "xfade",
     addSfx:           false,
   });
-  const [showMusicLibrary, setShowMusicLibrary] = useState(false);
+  const [showMusicLibrary,   setShowMusicLibrary]   = useState(false);
+  const [customUploading,    setCustomUploading]    = useState(false);
+  const customVideoRef = useRef<HTMLInputElement>(null);
 
   // Music+visuals only — no text overlays. Skips script generation step.
   const isSatisfyingMode = !renderOpts.showTitle && !renderOpts.showCaptions;
@@ -283,6 +285,27 @@ export default function StudioEditor() {
       audioRef.current.onended = () => setPlayingTrack(null);
       setPlayingTrack(trackId);
     }
+  };
+
+  // ── Custom video upload to B-Roll ─────────────────────────────────────────
+  const handleCustomVideoUpload = async (file: File) => {
+    if (!file.type.startsWith("video/")) return;
+    setCustomUploading(true);
+    try {
+      const form = new FormData();
+      form.append("video", file);
+      const res = await fetch("/api/studio/upload-video", { method: "POST", body: form });
+      if (!res.ok) return;
+      const data = await res.json();
+      const newAsset = { id: Date.now(), type: "video", url: data.url, thumbnail: data.url, source: "custom", keyword: file.name.replace(/\.[^.]+$/, "") };
+      const currentAssets = assets.length ? assets : [];
+      const updatedAssets = [...currentAssets, newAsset];
+      await fetch(`/api/projects/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assets: JSON.stringify(updatedAssets) }),
+      }).then(r => r.json()).then(setCache);
+    } finally { setCustomUploading(false); }
   };
 
   // ── TTS voiceover ─────────────────────────────────────────────────────────
@@ -622,50 +645,79 @@ export default function StudioEditor() {
 
               {/* ── B-Roll tab ─────────────────────────────────────────── */}
               {assetTab === "videos" && (
-                assets.length === 0 ? (
-                  <div className="text-center py-10">
-                    <ImageIcon className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                    <p className="text-xs text-gray-400">{isRunning ? "Fetching assets…" : "Click Generate Video to load B-roll clips."}</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <p className="text-[10px] text-gray-400">{assets.length} clips · click to preview</p>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {assets.map((asset, i) => {
-                        const isPrev = previewClip?.id === asset.id;
-                        return (
-                          <button
-                            key={i}
-                            onClick={() => setPreviewClip(isPrev ? null : asset)}
-                            className={cn(
-                              "aspect-video bg-gray-200 rounded overflow-hidden relative group border-2 transition-all",
-                              isPrev ? "border-amber-400" : "border-transparent hover:border-amber-200",
-                            )}
-                          >
-                            <img
-                              src={proxyUrl(asset.thumbnail)}
-                              alt={`Clip ${i + 1}`}
-                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-                              onError={e => {
-                                (e.target as HTMLImageElement).src =
-                                  `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='68'><rect fill='%23e5e7eb' width='120' height='68'/><text x='60' y='36' text-anchor='middle' fill='%236b7280' font-size='9'>Clip ${i+1}</text></svg>`;
-                              }}
-                            />
-                            <div className={cn(
-                              "absolute inset-0 flex items-center justify-center transition-opacity",
-                              isPrev ? "bg-amber-400/30 opacity-100" : "bg-black/40 opacity-0 group-hover:opacity-100",
-                            )}>
-                              <Play className="w-5 h-5 text-white drop-shadow" fill="white" />
-                            </div>
-                            <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-1.5 py-0.5">
-                              <span className="text-[9px] text-white truncate block">{asset.keyword}</span>
-                            </div>
-                          </button>
-                        );
-                      })}
+                <div className="space-y-2">
+                  {/* Custom upload button */}
+                  <input
+                    ref={customVideoRef}
+                    type="file"
+                    accept="video/*"
+                    className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) handleCustomVideoUpload(f); e.target.value = ""; }}
+                  />
+                  <button
+                    onClick={() => customVideoRef.current?.click()}
+                    disabled={customUploading}
+                    className="w-full flex items-center justify-center gap-2 py-2 border-2 border-dashed border-amber-200 rounded-lg text-xs font-semibold text-amber-700 hover:bg-amber-50 hover:border-amber-300 transition-all disabled:opacity-50"
+                  >
+                    {customUploading
+                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Uploading…</>
+                      : <><Plus className="w-3.5 h-3.5" />Add Custom Video</>
+                    }
+                  </button>
+
+                  {assets.length === 0 ? (
+                    <div className="text-center py-8">
+                      <ImageIcon className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                      <p className="text-xs text-gray-400">{isRunning ? "Fetching assets…" : "Upload a video above or click Generate Video for auto B-roll."}</p>
                     </div>
-                  </div>
-                )
+                  ) : (
+                    <>
+                      <p className="text-[10px] text-gray-400">{assets.length} clips · click to preview</p>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {assets.map((asset, i) => {
+                          const isPrev = previewClip?.id === asset.id;
+                          const isCustom = asset.source === "custom";
+                          return (
+                            <button
+                              key={i}
+                              onClick={() => setPreviewClip(isPrev ? null : asset)}
+                              className={cn(
+                                "aspect-video bg-gray-200 rounded overflow-hidden relative group border-2 transition-all",
+                                isPrev ? "border-amber-400" : "border-transparent hover:border-amber-200",
+                              )}
+                            >
+                              {isCustom ? (
+                                <div className="w-full h-full bg-gray-800 flex items-center justify-center">
+                                  <Upload className="w-4 h-4 text-gray-400" />
+                                </div>
+                              ) : (
+                                <img
+                                  src={proxyUrl(asset.thumbnail)}
+                                  alt={`Clip ${i + 1}`}
+                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                                  onError={e => {
+                                    (e.target as HTMLImageElement).src =
+                                      `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='68'><rect fill='%23374151' width='120' height='68'/><text x='60' y='36' text-anchor='middle' fill='%239ca3af' font-size='9'>Clip ${i+1}</text></svg>`;
+                                  }}
+                                />
+                              )}
+                              <div className={cn(
+                                "absolute inset-0 flex items-center justify-center transition-opacity",
+                                isPrev ? "bg-amber-400/30 opacity-100" : "bg-black/40 opacity-0 group-hover:opacity-100",
+                              )}>
+                                <Play className="w-5 h-5 text-white drop-shadow" fill="white" />
+                              </div>
+                              <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-1.5 py-0.5 flex items-center gap-1">
+                                {isCustom && <Upload className="w-2 h-2 text-amber-300 shrink-0" />}
+                                <span className="text-[9px] text-white truncate">{asset.keyword}</span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
               )}
 
               {/* ── Music tab ──────────────────────────────────────────── */}
