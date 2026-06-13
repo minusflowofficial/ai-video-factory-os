@@ -288,31 +288,58 @@ export default function StudioEditor() {
   };
 
   // ── Custom video upload to B-Roll ─────────────────────────────────────────
+  const [uploadProgress, setUploadProgress] = useState(0);
+
   const handleCustomVideoUpload = async (file: File) => {
     if (!file.type.startsWith("video/")) return;
-    // Warn on very large files — proxy limit is ~500 MB
-    if (file.size > 500 * 1024 * 1024) {
-      alert("File is too large (max 500 MB). Please compress or trim the video first.");
-      return;
-    }
+
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB per chunk — well under any proxy limit
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    const fileId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
     setCustomUploading(true);
+    setUploadProgress(0);
     try {
-      const form = new FormData();
-      form.append("video", file);
-      const res = await fetch("/api/studio/upload-video", { method: "POST", body: form });
-      if (!res.ok) {
-        const errText = await res.text().catch(() => "Upload failed");
-        alert(`Upload error: ${errText}`);
-        return;
+      // Upload each chunk sequentially
+      for (let i = 0; i < totalChunks; i++) {
+        const start = i * CHUNK_SIZE;
+        const end   = Math.min(start + CHUNK_SIZE, file.size);
+        const chunk = file.slice(start, end);
+
+        const form = new FormData();
+        form.append("chunk",       chunk);
+        form.append("fileId",      fileId);
+        form.append("chunkIndex",  String(i));
+        form.append("totalChunks", String(totalChunks));
+        form.append("filename",    file.name);
+
+        const res = await fetch("/api/studio/upload-chunk", { method: "POST", body: form });
+        if (!res.ok) {
+          const txt = await res.text().catch(() => "chunk upload failed");
+          throw new Error(txt);
+        }
+        setUploadProgress(Math.round(((i + 1) / totalChunks) * 90)); // 0-90% while uploading
       }
-      let data: { url: string };
-      try {
-        data = await res.json();
-      } catch {
-        alert("Upload failed: server returned an invalid response. The file may be too large.");
-        return;
+
+      // Finalize: assemble all chunks into one file
+      const finalRes = await fetch("/api/studio/upload-finalize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileId, filename: file.name, totalChunks }),
+      });
+      if (!finalRes.ok) {
+        const txt = await finalRes.text().catch(() => "finalize failed");
+        throw new Error(txt);
       }
-      const newAsset = { id: Date.now(), type: "video", url: data.url, thumbnail: data.url, source: "custom", keyword: file.name.replace(/\.[^.]+$/, "") };
+      const data = await finalRes.json() as { url: string };
+      setUploadProgress(100);
+
+      const newAsset = {
+        id: Date.now(), type: "video",
+        url: data.url, thumbnail: data.url,
+        source: "custom",
+        keyword: file.name.replace(/\.[^.]+$/, ""),
+      };
       const updatedAssets = [...(assets.length ? assets : []), newAsset];
       await fetch(`/api/projects/${id}`, {
         method: "PATCH",
@@ -321,7 +348,10 @@ export default function StudioEditor() {
       }).then(r => r.json()).then(setCache);
     } catch (err) {
       alert(`Upload failed: ${err instanceof Error ? err.message : "Unknown error"}`);
-    } finally { setCustomUploading(false); }
+    } finally {
+      setCustomUploading(false);
+      setUploadProgress(0);
+    }
   };
 
   // ── TTS voiceover ─────────────────────────────────────────────────────────
@@ -670,16 +700,30 @@ export default function StudioEditor() {
                     className="hidden"
                     onChange={e => { const f = e.target.files?.[0]; if (f) handleCustomVideoUpload(f); e.target.value = ""; }}
                   />
-                  <button
-                    onClick={() => customVideoRef.current?.click()}
-                    disabled={customUploading}
-                    className="w-full flex items-center justify-center gap-2 py-2 border-2 border-dashed border-amber-200 rounded-lg text-xs font-semibold text-amber-700 hover:bg-amber-50 hover:border-amber-300 transition-all disabled:opacity-50"
-                  >
-                    {customUploading
-                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />Uploading…</>
-                      : <><Plus className="w-3.5 h-3.5" />Add Custom Video</>
-                    }
-                  </button>
+                  {customUploading ? (
+                    <div className="w-full px-3 py-2 border-2 border-amber-300 rounded-lg bg-amber-50">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-xs font-semibold text-amber-700 flex items-center gap-1.5">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          Uploading… {uploadProgress}%
+                        </span>
+                        <span className="text-[10px] text-amber-500">chunk-by-chunk</span>
+                      </div>
+                      <div className="w-full h-1.5 bg-amber-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-amber-400 rounded-full transition-all duration-300"
+                          style={{ width: `${uploadProgress}%` }}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => customVideoRef.current?.click()}
+                      className="w-full flex items-center justify-center gap-2 py-2 border-2 border-dashed border-amber-200 rounded-lg text-xs font-semibold text-amber-700 hover:bg-amber-50 hover:border-amber-300 transition-all"
+                    >
+                      <Plus className="w-3.5 h-3.5" />Add Custom Video (any size)
+                    </button>
+                  )}
 
                   {assets.length === 0 ? (
                     <div className="text-center py-8">

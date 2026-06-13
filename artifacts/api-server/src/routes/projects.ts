@@ -14,11 +14,27 @@ import { searchMixkitVideos, searchMixkitMusic } from "../mixkit-search";
 import multer from "multer";
 
 const STUDIO_UPLOADS_DIR = "/tmp/studio-uploads";
+const STUDIO_CHUNKS_DIR  = "/tmp/studio-chunks";
+
+// Multer for whole-file uploads (kept for small files < ~50 MB)
 const studioStorage = multer.diskStorage({
   destination: (_req, _file, cb) => { fs.mkdirSync(STUDIO_UPLOADS_DIR, { recursive: true }); cb(null, STUDIO_UPLOADS_DIR); },
   filename:    (_req,  file, cb) => { const ext = path.extname(file.originalname) || ".mp4"; cb(null, `${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`); },
 });
 const studioUpload = multer({ storage: studioStorage, limits: { fileSize: 4 * 1024 * 1024 * 1024 } });
+
+// Multer for individual chunks (max 8 MB per chunk)
+const chunkStorage = multer.diskStorage({
+  destination: (req, _file, cb) => {
+    const dir = path.join(STUDIO_CHUNKS_DIR, req.body.fileId ?? "unknown");
+    fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, _file, cb) => {
+    cb(null, `chunk-${req.body.chunkIndex ?? 0}`);
+  },
+});
+const chunkUpload = multer({ storage: chunkStorage, limits: { fileSize: 8 * 1024 * 1024 } });
 
 const router: IRouter = Router();
 const execFileAsync = promisify(execFile);
@@ -127,6 +143,51 @@ function wrapText(text: string, maxCharsPerLine: number, maxLines: number): stri
 // ---------------------------------------------------------------------------
 // Studio video upload + serve
 // ---------------------------------------------------------------------------
+
+// ── Chunked upload: receive one 5MB piece ───────────────────────────────────
+router.post("/studio/upload-chunk", (req, res) => {
+  chunkUpload.single("chunk")(req, res, (err) => {
+    if (err) { res.status(400).json({ error: err.message }); return; }
+    if (!req.file) { res.status(400).json({ error: "No chunk data" }); return; }
+    res.json({ ok: true, chunkIndex: Number(req.body.chunkIndex) });
+  });
+});
+
+// ── Chunked upload: assemble all chunks into final file ─────────────────────
+router.post("/studio/upload-finalize", async (req, res): Promise<void> => {
+  const { fileId, filename, totalChunks } = req.body ?? {};
+  if (!fileId || !filename || !totalChunks) {
+    res.status(400).json({ error: "Missing fileId, filename, or totalChunks" }); return;
+  }
+  const total   = Number(totalChunks);
+  const ext     = path.extname(filename) || ".mp4";
+  const outName = `${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`;
+  const outPath = path.join(STUDIO_UPLOADS_DIR, outName);
+  const chunkDir = path.join(STUDIO_CHUNKS_DIR, fileId);
+
+  try {
+    fs.mkdirSync(STUDIO_UPLOADS_DIR, { recursive: true });
+    const out = fs.createWriteStream(outPath);
+    for (let i = 0; i < total; i++) {
+      const chunkPath = path.join(chunkDir, `chunk-${i}`);
+      const data = await fs.promises.readFile(chunkPath);
+      await new Promise<void>((resolve, reject) => {
+        out.write(data, (e) => e ? reject(e) : resolve());
+      });
+    }
+    await new Promise<void>((resolve, reject) => out.end((e?: Error | null) => e ? reject(e) : resolve()));
+    // Clean up chunks
+    fs.rmSync(chunkDir, { recursive: true, force: true });
+
+    const url = `/api/studio/uploads/${outName}`;
+    res.json({ url, filename: outName, sizeMb: +((fs.statSync(outPath).size) / 1024 / 1024).toFixed(1) });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(500).json({ error: `Assembly failed: ${msg}` });
+  }
+});
+
+// ── Legacy single-request upload (small files only, kept for compatibility) ─
 router.post("/studio/upload-video", (req, res, next) => {
   studioUpload.single("video")(req, res, (err) => {
     if (err) { res.status(400).json({ error: err.message }); return; }
