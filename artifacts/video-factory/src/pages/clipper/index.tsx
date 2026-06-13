@@ -131,19 +131,42 @@ export default function ClipperPage() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [jobId]);
 
-  // Handle file upload
+  const [uploadProgress, setUploadProgress] = useState(0);
+
+  // Handle file upload — chunked so any size works through the proxy
   const handleFile = useCallback(async (file: File) => {
     if (!file.type.startsWith("video/")) { setError("Please upload a video file (MP4, MOV, etc.)"); return; }
-    setUploading(true); setError(null);
+    setUploading(true); setError(null); setUploadProgress(0);
     try {
-      const form = new FormData();
-      form.append("video", file);
-      const res  = await fetch("/api/clipper/upload", { method: "POST", body: form });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error ?? "Upload failed"); return; }
+      const CHUNK_SIZE  = 5 * 1024 * 1024; // 5 MB
+      const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+      const fileId      = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+      for (let i = 0; i < totalChunks; i++) {
+        const start = i * CHUNK_SIZE;
+        const chunk = file.slice(start, Math.min(start + CHUNK_SIZE, file.size));
+        const form  = new FormData();
+        form.append("chunk",       chunk);
+        form.append("fileId",      fileId);
+        form.append("chunkIndex",  String(i));
+        form.append("totalChunks", String(totalChunks));
+        form.append("filename",    file.name);
+        const res = await fetch("/api/clipper/upload-chunk", { method: "POST", body: form });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error((d as any).error ?? "Chunk upload failed"); }
+        setUploadProgress(Math.round(((i + 1) / totalChunks) * 90));
+      }
+
+      const finalRes = await fetch("/api/clipper/upload-finalize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileId, filename: file.name, totalChunks }),
+      });
+      if (!finalRes.ok) { const d = await finalRes.json().catch(() => ({})); throw new Error((d as any).error ?? "Finalize failed"); }
+      const data = await finalRes.json();
+      setUploadProgress(100);
       setUploadedFile({ path: data.filePath, name: file.name, sizeMb: data.sizeMb });
     } catch (e: any) { setError(e.message ?? "Upload failed"); }
-    finally { setUploading(false); }
+    finally { setUploading(false); setUploadProgress(0); }
   }, []);
 
   const onDrop = useCallback((e: React.DragEvent) => {
@@ -360,9 +383,16 @@ export default function ClipperPage() {
                         )}>
                         <input ref={fileInput} type="file" accept="video/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
                         {uploading ? (
-                          <><Loader2 className="w-8 h-8 text-amber-400 animate-spin mx-auto mb-2" /><p className="text-sm text-gray-500">Uploading…</p></>
+                          <div className="py-2">
+                            <Loader2 className="w-7 h-7 text-amber-400 animate-spin mx-auto mb-3" />
+                            <p className="text-sm font-semibold text-gray-700 mb-2">Uploading… {uploadProgress}%</p>
+                            <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                              <div className="h-full bg-amber-400 rounded-full transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
+                            </div>
+                            <p className="text-xs text-gray-400 mt-2">Sending in 5 MB chunks — works for any file size</p>
+                          </div>
                         ) : (
-                          <><Upload className="w-8 h-8 text-gray-300 mx-auto mb-2" /><p className="text-sm font-semibold text-gray-700">Drop video here or click to browse</p><p className="text-xs text-gray-400 mt-1">MP4, MOV, AVI — up to 4 GB</p></>
+                          <><Upload className="w-8 h-8 text-gray-300 mx-auto mb-2" /><p className="text-sm font-semibold text-gray-700">Drop video here or click to browse</p><p className="text-xs text-gray-400 mt-1">MP4, MOV, AVI — any size supported</p></>
                         )}
                       </div>
                     )}

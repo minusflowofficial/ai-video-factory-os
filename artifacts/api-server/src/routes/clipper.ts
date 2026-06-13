@@ -29,16 +29,29 @@ const PYTHON = process.env.PYTHON_PATH ?? "python3";
 const CREATE_CLIP_SCRIPT = path.resolve("../../scripts/create_clip.py");
 const COOKIES_PATH = path.resolve("../../.youtube-cookies.txt");
 
-// ── File upload (up to 4 GB) ──────────────────────────────────────────────────
+const CLIPPER_UPLOADS_DIR = "/tmp/clipper-uploads";
+const CLIPPER_CHUNKS_DIR  = "/tmp/clipper-chunks";
+
+// ── File upload (kept for very small files / backward compat) ─────────────────
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
-    const dir = "/tmp/clipper-uploads";
-    fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
+    fs.mkdirSync(CLIPPER_UPLOADS_DIR, { recursive: true });
+    cb(null, CLIPPER_UPLOADS_DIR);
   },
   filename: (_req, _file, cb) => cb(null, `${Date.now()}-${crypto.randomBytes(6).toString("hex")}.mp4`),
 });
 const upload = multer({ storage, limits: { fileSize: 4 * 1024 * 1024 * 1024 } });
+
+// ── Chunked upload multer (max 8 MB per chunk) ────────────────────────────────
+const chunkStorage = multer.diskStorage({
+  destination: (req, _file, cb) => {
+    const dir = path.join(CLIPPER_CHUNKS_DIR, req.body.fileId ?? "unknown");
+    fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, _file, cb) => cb(null, `chunk-${req.body.chunkIndex ?? 0}`),
+});
+const chunkUpload = multer({ storage: chunkStorage, limits: { fileSize: 8 * 1024 * 1024 } });
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface ClipResult {
@@ -284,7 +297,8 @@ Return ONLY a JSON array (no other text):
   if (!res.ok) throw new Error(`AI API ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const aiData = await res.json() as any;
   const raw = aiData.choices?.[0]?.message?.content ?? "[]";
-  const match = raw.match(/\[[\s\S]*?\]/);
+  // Greedy match — captures the outermost [...] including nested arrays like hashtags
+  const match = raw.match(/\[[\s\S]*\]/);
   if (!match) throw new Error("No JSON array from AI");
   job.progress = 50;
 
@@ -503,7 +517,43 @@ router.post("/clipper/save-cookies", async (req, res): Promise<void> => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-// POST /api/clipper/upload  — multipart file upload
+// POST /api/clipper/upload-chunk — receive one 5 MB piece
+router.post("/clipper/upload-chunk", (req, res) => {
+  chunkUpload.single("chunk")(req, res, (err) => {
+    if (err) { res.status(400).json({ error: err.message }); return; }
+    if (!req.file) { res.status(400).json({ error: "No chunk data" }); return; }
+    res.json({ ok: true, chunkIndex: Number(req.body.chunkIndex) });
+  });
+});
+
+// POST /api/clipper/upload-finalize — assemble all chunks into final file
+router.post("/clipper/upload-finalize", async (req, res): Promise<void> => {
+  const { fileId, filename, totalChunks } = req.body ?? {};
+  if (!fileId || !filename || !totalChunks) {
+    res.status(400).json({ error: "Missing fileId, filename, or totalChunks" }); return;
+  }
+  const total    = Number(totalChunks);
+  const ext      = path.extname(filename) || ".mp4";
+  const outName  = `${Date.now()}-${crypto.randomBytes(6).toString("hex")}${ext}`;
+  const outPath  = path.join(CLIPPER_UPLOADS_DIR, outName);
+  const chunkDir = path.join(CLIPPER_CHUNKS_DIR, fileId);
+  try {
+    fs.mkdirSync(CLIPPER_UPLOADS_DIR, { recursive: true });
+    const out = fs.createWriteStream(outPath);
+    for (let i = 0; i < total; i++) {
+      const data = await fs.promises.readFile(path.join(chunkDir, `chunk-${i}`));
+      await new Promise<void>((resolve, reject) => out.write(data, e => e ? reject(e) : resolve()));
+    }
+    await new Promise<void>((resolve, reject) => out.end((e?: Error | null) => e ? reject(e) : resolve()));
+    fs.rmSync(chunkDir, { recursive: true, force: true });
+    const sizeMb = Math.round(fs.statSync(outPath).size / 1024 / 1024 * 10) / 10;
+    res.json({ filePath: outPath, originalName: filename, sizeMb });
+  } catch (e: unknown) {
+    res.status(500).json({ error: `Assembly failed: ${e instanceof Error ? e.message : String(e)}` });
+  }
+});
+
+// POST /api/clipper/upload  — legacy single-request upload (small files)
 router.post("/clipper/upload", (req, res, next) => {
   upload.single("video")(req, res, (err) => {
     if (err) { res.status(400).json({ error: err.message }); return; }
