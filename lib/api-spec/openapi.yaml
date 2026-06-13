@@ -487,6 +487,10 @@ components:
           type: string
         language:
           type: string
+        quotes:
+          type: array
+          items:
+            type: string
 
     Settings:
       type: object

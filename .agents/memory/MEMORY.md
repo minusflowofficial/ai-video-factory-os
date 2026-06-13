@@ -1,0 +1,1 @@
+- [Bulk pipeline patterns](bulk-pipeline.md) — retry wrapper, output storage, manual quotes flow for bulk-jobs.ts
