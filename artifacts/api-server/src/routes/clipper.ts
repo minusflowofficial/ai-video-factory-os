@@ -747,4 +747,20 @@ router.get("/pixabay/search", async (req, res): Promise<void> => {
   }
 });
 
+// ── POST /api/clipper/cleanup — delete expired sessions from DB ───────────────
+router.post("/clipper/cleanup", async (_req, res): Promise<void> => {
+  try {
+    const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+    const expiryCutoff  = new Date(Date.now() - FOUR_HOURS_MS);
+    const { lt } = await import("drizzle-orm");
+    const deleted = await db
+      .delete(clipperHistoryTable)
+      .where(lt(clipperHistoryTable.createdAt, expiryCutoff))
+      .returning({ id: clipperHistoryTable.id });
+    res.json({ deleted: deleted.length });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

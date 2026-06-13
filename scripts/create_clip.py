@@ -201,6 +201,11 @@ def make_ass(captions, hook, clip_duration, target_w, target_h, cap_style,
     bstyle    = 1   # outline + shadow mode
     shadow    = 1
 
+    # Two caption font styles that mix for a professional, dynamic look.
+    # libass picks up fonts from fontsdir; glyphs for non-Latin scripts
+    # fall back automatically to system fonts that carry them.
+    cap_fs2 = max(22, int(ref * 0.028))   # Montserrat is slightly wider → smaller
+
     # WrapStyle 1 = end-of-line wrap, respects margins — most reliable with libass
     header = (
         f"[Script Info]\nScriptType: v4.00+\n"
@@ -211,20 +216,24 @@ def make_ass(captions, hook, clip_duration, target_w, target_h, cap_style,
         f"OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
         f"ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         f"Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        # Alignment 8 = top-centre
-        f"Style: HookTop,Noto Sans CJK JP,{hook_fs},&H00FFFFFF,&H000000FF,{out_c},"
+        # Hook — top-centre, Oswald (tall + impactful for titles)
+        f"Style: HookTop,Oswald,{hook_fs},&H00FFFFFF,&H000000FF,{out_c},"
         f"&H00000000,1,0,0,0,100,100,1,0,{bstyle},{outline_w},{shadow},8,{side_mg},{side_mg},{top_mg},1\n"
-        # Alignment 2 = bottom-centre
-        f"Style: Caption,Noto Sans CJK JP,{cap_fs},&H00FFFFFF,&H000000FF,{out_c},"
+        # Caption A — bottom-centre, Oswald Bold (chunky, high impact)
+        f"Style: Caption,Oswald,{cap_fs},&H00FFFFFF,&H000000FF,{out_c},"
+        f"&H00000000,1,0,0,0,100,100,0,0,{bstyle},{outline_w},{shadow},2,{side_mg},{side_mg},{bot_mg},1\n"
+        # Caption B — bottom-centre, Montserrat Bold (clean, modern contrast)
+        f"Style: Caption2,Montserrat,{cap_fs2},&H00FFFFFF,&H000000FF,{out_c},"
         f"&H00000000,1,0,0,0,100,100,0,0,{bstyle},{outline_w},{shadow},2,{side_mg},{side_mg},{bot_mg},1\n\n"
         f"[Events]\n"
         f"Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
 
-    events       = []
-    color_counter = 0   # global word counter so colours cycle across whole clip
+    events        = []
+    color_counter = 0    # global word counter for colour cycling
+    chunk_counter = 0    # global chunk counter for font alternation
 
-    # Hook / title — colorised, top-centre
+    # Hook / title — colorised, top-centre (Oswald via HookTop style)
     if hook and show_hook:
         hook_end  = clip_duration if hook_full_duration else min(3.5, clip_duration * 0.20)
         safe_hook = hook.replace("\n", " ").replace(",", "，")
@@ -235,6 +244,7 @@ def make_ass(captions, hook, clip_duration, target_w, target_h, cap_style,
         )
 
     # Caption chunks — colorised, bottom-centre, 2 words each
+    # Alternates between Caption (Oswald) and Caption2 (Montserrat) every chunk
     for cap in captions:
         s    = max(0.0, float(cap.get("start", 0)))
         e    = min(float(cap.get("end", s + 4)), clip_duration)
@@ -248,10 +258,13 @@ def make_ass(captions, hook, clip_duration, target_w, target_h, cap_style,
             cs      = s + i * dur
             ce      = s + (i + 1) * dur
             display = chunk.upper() if cap_style in ("Bold Yellow", "Fire") else chunk
-            colored  = colorize_words(display.replace(",", "，"), color_counter)
+            colored = colorize_words(display.replace(",", "，"), color_counter)
             color_counter += len(display.split())
+            # alternate font style every chunk for mixed-font effect
+            style   = "Caption" if chunk_counter % 2 == 0 else "Caption2"
+            chunk_counter += 1
             events.append(
-                f"Dialogue: 0,{ass_ts(cs)},{ass_ts(ce)},Caption,,0,0,0,,{{\\an2}}{colored}"
+                f"Dialogue: 0,{ass_ts(cs)},{ass_ts(ce)},{style},,0,0,0,,{{\\an2}}{colored}"
             )
 
     return header + "\n".join(events)

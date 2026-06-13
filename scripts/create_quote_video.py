@@ -226,7 +226,8 @@ def main():
     music_url = sys.argv[3]
     output    = sys.argv[4]
     aspect    = sys.argv[5] if len(sys.argv) > 5 else "9:16"
-    # language  = sys.argv[6] if len(sys.argv) > 6 else "English"  # reserved
+    language  = sys.argv[6] if len(sys.argv) > 6 else "English"
+    duration  = int(sys.argv[7]) if len(sys.argv) > 7 else 15
 
     if aspect == "9:16":
         w, h = 1080, 1920
@@ -234,8 +235,6 @@ def main():
         w, h = 1080, 1080
     else:
         w, h = 1920, 1080
-
-    duration = 30
 
     # Split "Quote text - Author Name" if present
     author = ""

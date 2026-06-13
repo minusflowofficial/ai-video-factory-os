@@ -9,7 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getListProjectsQueryKey } from "@workspace/api-client-react";
 import {
   Film, Plus, Trash2, Clock, MonitorPlay, Smartphone, Square,
-  FolderOpen, ChevronDown, ChevronRight, Download, Quote,
+  FolderOpen, Download, Quote,
   Scissors, Youtube, Upload as UploadIcon, LayoutList, Timer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -48,14 +48,14 @@ function useNowTick(intervalMs = 30_000) {
 function clipperExpiryBadge(createdAtStr: string, now: number) {
   const createdAt = new Date(createdAtStr).getTime();
   const msLeft    = (createdAt + CLIP_TTL_MS) - now;
-  if (msLeft <= 0) return { text: "Expired", color: "text-red-400 bg-red-50 border-red-100" };
+  if (msLeft <= 0) return { text: "Expired", color: "text-red-400 bg-red-50 border-red-100", expired: true };
   const h = Math.floor(msLeft / 3600000);
   const m = Math.floor((msLeft % 3600000) / 60000);
   const label = h > 0 ? `${h}h ${m}m left` : `${m}m left`;
   const color = h >= 2
     ? "text-emerald-600 bg-emerald-50 border-emerald-100"
     : "text-amber-600 bg-amber-50 border-amber-100";
-  return { text: label, color };
+  return { text: label, color, expired: false };
 }
 
 export default function ProjectsHistory() {
@@ -76,6 +76,12 @@ export default function ProjectsHistory() {
   const [expandedBulkId,     setExpandedBulkId]     = useState<number | null>(null);
   const [bulkOutputs,        setBulkOutputs]        = useState<Record<number, BulkOutput[]>>({});
   const [bulkOutputsLoading, setBulkOutputsLoading] = useState<number | null>(null);
+
+  // ── Run cleanup on mount ──────────────────────────────────────────────────────
+  useEffect(() => {
+    fetch("/api/clipper/cleanup",    { method: "POST" }).catch(() => {});
+    fetch("/api/bulk-jobs/cleanup",  { method: "POST" }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (tab !== "clipper") return;
@@ -108,6 +114,12 @@ export default function ProjectsHistory() {
     }
   };
 
+  // Filter out expired clipper sessions — they've been cleaned from DB, so
+  // also filter any that slipped through before the next cleanup run
+  const activeSessions = clipperSessions.filter(
+    s => new Date(s.createdAt).getTime() + CLIP_TTL_MS > now,
+  );
+
   return (
     <AppLayout>
       <div className="p-6 max-w-6xl mx-auto">
@@ -128,8 +140,8 @@ export default function ProjectsHistory() {
         {/* Tabs */}
         <div className="flex items-center gap-1 mb-5 border-b border-gray-100">
           {[
-            { id: "studio",  label: "Studio",          icon: <LayoutList className="w-3.5 h-3.5" /> },
-            { id: "bulk",    label: "Bulk Batches",    icon: <FolderOpen className="w-3.5 h-3.5" /> },
+            { id: "studio",  label: "Studio",           icon: <LayoutList className="w-3.5 h-3.5" /> },
+            { id: "bulk",    label: "Bulk Batches",     icon: <FolderOpen className="w-3.5 h-3.5" /> },
             { id: "clipper", label: "Clipper Sessions", icon: <Scissors   className="w-3.5 h-3.5" /> },
           ].map(t => (
             <button
@@ -234,9 +246,9 @@ export default function ProjectsHistory() {
           </>
         )}
 
-        {/* ── BULK BATCHES TAB ── */}
+        {/* ── BULK BATCHES TAB — grid of batch cards ── */}
         {tab === "bulk" && (
-          <div className="space-y-3">
+          <>
             {(bulkJobs as any[]).length === 0 ? (
               <div className="text-center py-20 bg-white rounded-2xl border border-gray-100 border-dashed">
                 <FolderOpen className="w-10 h-10 text-gray-300 mx-auto mb-3" />
@@ -249,99 +261,131 @@ export default function ProjectsHistory() {
                 </Link>
               </div>
             ) : (
-              (bulkJobs as any[]).map((job) => {
-                const isExpanded = expandedBulkId === job.id;
-                const outputs    = bulkOutputs[job.id] ?? [];
-                const isLoading  = bulkOutputsLoading === job.id;
-                const isQuotes   = job.goal === "quotes";
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {(bulkJobs as any[]).map((job) => {
+                  const isExpanded = expandedBulkId === job.id;
+                  const outputs    = bulkOutputs[job.id] ?? [];
+                  const loadingRow = bulkOutputsLoading === job.id;
+                  const isQuotes   = job.goal === "quotes";
+                  const progress   = job.totalVideos > 0
+                    ? Math.round(((job.completedCount || 0) / job.totalVideos) * 100)
+                    : 0;
 
-                return (
-                  <div key={job.id} className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-                    {/* Folder header */}
-                    <button
-                      onClick={() => toggleBulkExpand(job.id)}
-                      className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-gray-50 transition-colors text-left"
-                    >
-                      <FolderOpen className={cn("w-5 h-5 shrink-0", isQuotes ? "text-amber-500" : "text-blue-500")} />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold text-gray-900 text-sm">{job.niche}</span>
-                          {isQuotes && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200 flex items-center gap-0.5">
-                              <Quote className="w-2.5 h-2.5" /> Quotes
-                            </span>
-                          )}
-                          <StatusBadge status={job.status} />
+                  return (
+                    <div key={job.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+                      {/* Card header */}
+                      <div className="p-4 flex items-start gap-3">
+                        <div className={cn(
+                          "w-10 h-10 rounded-xl flex items-center justify-center shrink-0",
+                          isQuotes ? "bg-amber-50 border border-amber-200" : "bg-blue-50 border border-blue-200",
+                        )}>
+                          {isQuotes
+                            ? <Quote      className="w-5 h-5 text-amber-500" />
+                            : <FolderOpen className="w-5 h-5 text-blue-500" />}
                         </div>
-                        <p className="text-[10px] text-gray-400 mt-0.5">
-                          {job.completedCount}/{job.totalVideos} videos ·{" "}
-                          {new Date(job.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                        </p>
-                      </div>
-                      {isLoading ? (
-                        <div className="w-4 h-4 border-2 border-amber-300 border-t-amber-600 rounded-full animate-spin shrink-0" />
-                      ) : isExpanded ? (
-                        <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
-                      ) : (
-                        <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
-                      )}
-                    </button>
-
-                    {/* Outputs list */}
-                    {isExpanded && (
-                      <div className="border-t border-gray-100 divide-y divide-gray-50">
-                        {outputs.length === 0 ? (
-                          <div className="px-4 py-6 text-center text-sm text-gray-400">
-                            {isQuotes
-                              ? "No video outputs found. Videos may still be processing or files may have expired."
-                              : "Videos for this batch are Studio projects — find them in the Studio tab."}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold text-gray-900 text-sm truncate">{job.niche}</span>
+                            <StatusBadge status={job.status} />
                           </div>
-                        ) : (
-                          outputs.map((output, i) => (
-                            <div key={output.id} className="flex items-start gap-3 px-4 py-3 hover:bg-gray-50/50">
-                              <div className="w-8 h-8 rounded-lg bg-amber-50 border border-amber-100 flex items-center justify-center shrink-0 text-xs font-bold text-amber-600">
-                                {(output.videoIndex ?? i) + 1}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-xs text-gray-700 line-clamp-2 leading-relaxed">
-                                  {output.quoteText || `Video ${(output.videoIndex ?? i) + 1}`}
+                          <p className="text-[10px] text-gray-400 mt-0.5">
+                            {job.completedCount}/{job.totalVideos} videos ·{" "}
+                            {new Date(job.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Progress bar */}
+                      <div className="px-4 pb-3">
+                        <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div
+                            className={cn("h-full rounded-full transition-all", isQuotes ? "bg-amber-400" : "bg-blue-400")}
+                            style={{ width: `${progress}%` }}
+                          />
+                        </div>
+                        <p className="text-[10px] text-gray-400 mt-1">{progress}% complete</p>
+                      </div>
+
+                      {/* Expand / collapse outputs button */}
+                      {isQuotes && (
+                        <div className="border-t border-gray-100">
+                          <button
+                            onClick={() => toggleBulkExpand(job.id)}
+                            className="w-full flex items-center justify-center gap-1.5 px-4 py-2.5 text-xs font-semibold text-amber-700 hover:bg-amber-50 transition-colors"
+                          >
+                            {loadingRow ? (
+                              <span className="w-3.5 h-3.5 border-2 border-amber-300 border-t-amber-600 rounded-full animate-spin" />
+                            ) : (
+                              <Download className="w-3.5 h-3.5" />
+                            )}
+                            {isExpanded ? "Hide videos" : "View videos"}
+                          </button>
+
+                          {/* Inline video output grid */}
+                          {isExpanded && (
+                            <div className="border-t border-gray-100 p-3">
+                              {outputs.length === 0 ? (
+                                <p className="text-xs text-gray-400 text-center py-3">
+                                  No outputs yet — still processing or files expired.
                                 </p>
-                                <p className="text-[10px] text-gray-400 mt-0.5">
-                                  {new Date(output.createdAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
-                                  {!output.fileExists && <span className="text-red-400 ml-1">· file expired</span>}
-                                </p>
-                              </div>
-                              {output.fileExists ? (
-                                <a
-                                  href={`/api/bulk-outputs/${output.id}/download`}
-                                  download
-                                  className="flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2.5 py-1 rounded-lg transition-colors shrink-0"
-                                  onClick={e => e.stopPropagation()}
-                                >
-                                  <Download className="w-3 h-3" /> Download
-                                </a>
                               ) : (
-                                <span className="text-[11px] text-gray-300 px-2.5 py-1 border border-gray-100 rounded-lg shrink-0">Expired</span>
+                                <div className="grid grid-cols-2 gap-2">
+                                  {outputs.map((output, i) => (
+                                    <div
+                                      key={output.id}
+                                      className={cn(
+                                        "rounded-xl border p-2.5 flex flex-col gap-1.5",
+                                        output.fileExists
+                                          ? "border-amber-100 bg-amber-50/50"
+                                          : "border-gray-100 bg-gray-50 opacity-60",
+                                      )}
+                                    >
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="w-5 h-5 rounded-md bg-amber-200/60 text-amber-800 text-[9px] font-bold flex items-center justify-center shrink-0">
+                                          {(output.videoIndex ?? i) + 1}
+                                        </span>
+                                        <p className="text-[10px] text-gray-600 line-clamp-2 leading-tight flex-1">
+                                          {output.quoteText || `Video ${(output.videoIndex ?? i) + 1}`}
+                                        </p>
+                                      </div>
+                                      {output.fileExists ? (
+                                        <a
+                                          href={`/api/bulk-outputs/${output.id}/download`}
+                                          download
+                                          className="flex items-center justify-center gap-1 text-[10px] font-semibold text-amber-700 bg-amber-100 hover:bg-amber-200 border border-amber-200 px-2 py-1 rounded-lg transition-colors"
+                                          onClick={e => e.stopPropagation()}
+                                        >
+                                          <Download className="w-2.5 h-2.5" /> Download
+                                        </a>
+                                      ) : (
+                                        <span className="text-[10px] text-gray-400 text-center">File expired</span>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
                               )}
                             </div>
-                          ))
-                        )}
+                          )}
+                        </div>
+                      )}
 
-                        {/* For standard jobs: link to Studio */}
-                        {!isQuotes && (
-                          <div className="px-4 py-3 bg-blue-50/50">
-                            <p className="text-xs text-blue-600">
-                              Standard batch videos are Studio projects. <Link href="/projects" className="font-semibold underline" onClick={() => setTab("studio")}>View in Studio tab →</Link>
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })
+                      {/* Standard batches: link to Studio tab */}
+                      {!isQuotes && (
+                        <div className="border-t border-gray-100 px-4 py-2.5 bg-blue-50/50">
+                          <p className="text-xs text-blue-600">
+                            Videos are Studio projects.{" "}
+                            <button className="font-semibold underline" onClick={() => setTab("studio")}>
+                              View in Studio tab →
+                            </button>
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             )}
-          </div>
+          </>
         )}
 
         {/* ── CLIPPER SESSIONS TAB ── */}
@@ -353,11 +397,15 @@ export default function ProjectsHistory() {
                   <div key={i} className="bg-gray-100 rounded-xl animate-pulse h-20" />
                 ))}
               </div>
-            ) : clipperSessions.length === 0 ? (
+            ) : activeSessions.length === 0 ? (
               <div className="text-center py-20 bg-white rounded-2xl border border-gray-100 border-dashed">
                 <Scissors className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-                <h3 className="font-semibold text-gray-700 mb-1.5">No clipper sessions yet</h3>
-                <p className="text-sm text-gray-400 mb-5">Create viral clips from any YouTube video or upload.</p>
+                <h3 className="font-semibold text-gray-700 mb-1.5">No active clipper sessions</h3>
+                <p className="text-sm text-gray-400 mb-5">
+                  {clipperSessions.length > 0
+                    ? "All previous sessions have expired (clips are available for 4 hours)."
+                    : "Create viral clips from any YouTube video or upload."}
+                </p>
                 <Link href="/clipper">
                   <Button size="sm" className="bg-amber-400 hover:bg-amber-500 text-amber-950 font-semibold text-xs">
                     Open Clipper
@@ -365,59 +413,57 @@ export default function ProjectsHistory() {
                 </Link>
               </div>
             ) : (
-              clipperSessions.map(session => (
-                <div key={session.id} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-start gap-4 hover:border-amber-200 transition-colors">
-                  {/* Source icon */}
-                  <div className={cn(
-                    "w-10 h-10 rounded-lg flex items-center justify-center shrink-0",
-                    session.sourceType === "youtube" ? "bg-red-50 border border-red-100" : "bg-blue-50 border border-blue-100",
-                  )}>
-                    {session.sourceType === "youtube"
-                      ? <Youtube className="w-5 h-5 text-red-500" />
-                      : <UploadIcon className="w-5 h-5 text-blue-500" />}
-                  </div>
-
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-sm text-gray-900 truncate">
-                      {session.filename ?? session.sourceUrl ?? "Clipper Session"}
-                    </p>
-                    <div className="flex items-center gap-2 mt-1 flex-wrap">
-                      <span className="text-[10px] font-medium bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
-                        {session.aspectRatio}
-                      </span>
-                      <span className="text-[10px] font-medium bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
-                        {session.captionStyle}
-                      </span>
-                          <span className="text-[10px] text-gray-400">
-                        {session.doneClips}/{session.numClips} clips
-                      </span>
-                      <span className="text-[10px] text-gray-400">
-                        {new Date(session.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                      </span>
-                      {(() => {
-                        const badge = clipperExpiryBadge(session.createdAt, now);
-                        return (
-                          <span className={cn(
-                            "inline-flex items-center gap-0.5 text-[10px] font-semibold border px-1.5 py-0.5 rounded-full",
-                            badge.color,
-                          )}>
-                            <Timer className="w-2.5 h-2.5" />{badge.text}
-                          </span>
-                        );
-                      })()}
+              activeSessions.map(session => {
+                const badge = clipperExpiryBadge(session.createdAt, now);
+                return (
+                  <div key={session.id} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-start gap-4 hover:border-amber-200 transition-colors">
+                    {/* Source icon */}
+                    <div className={cn(
+                      "w-10 h-10 rounded-lg flex items-center justify-center shrink-0",
+                      session.sourceType === "youtube" ? "bg-red-50 border border-red-100" : "bg-blue-50 border border-blue-100",
+                    )}>
+                      {session.sourceType === "youtube"
+                        ? <Youtube    className="w-5 h-5 text-red-500" />
+                        : <UploadIcon className="w-5 h-5 text-blue-500" />}
                     </div>
-                  </div>
 
-                  {/* Action */}
-                  <Link href="/clipper">
-                    <Button variant="outline" size="sm"
-                      className="h-8 text-xs border-amber-200 text-amber-700 hover:bg-amber-50 shrink-0">
-                      <Scissors className="w-3 h-3 mr-1" /> Open
-                    </Button>
-                  </Link>
-                </div>
-              ))
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm text-gray-900 truncate">
+                        {session.filename ?? session.sourceUrl ?? "Clipper Session"}
+                      </p>
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        <span className="text-[10px] font-medium bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
+                          {session.aspectRatio}
+                        </span>
+                        <span className="text-[10px] font-medium bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
+                          {session.captionStyle}
+                        </span>
+                        <span className="text-[10px] text-gray-400">
+                          {session.doneClips}/{session.numClips} clips
+                        </span>
+                        <span className="text-[10px] text-gray-400">
+                          {new Date(session.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                        </span>
+                        <span className={cn(
+                          "inline-flex items-center gap-0.5 text-[10px] font-semibold border px-1.5 py-0.5 rounded-full",
+                          badge.color,
+                        )}>
+                          <Timer className="w-2.5 h-2.5" />{badge.text}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Action */}
+                    <Link href="/clipper">
+                      <Button variant="outline" size="sm"
+                        className="h-8 text-xs border-amber-200 text-amber-700 hover:bg-amber-50 shrink-0">
+                        <Scissors className="w-3 h-3 mr-1" /> Open
+                      </Button>
+                    </Link>
+                  </div>
+                );
+              })
             )}
           </div>
         )}

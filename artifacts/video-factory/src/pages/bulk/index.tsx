@@ -8,7 +8,7 @@ import { useState, useRef } from "react";
 import { useListBulkJobs, useCreateBulkJob, useCancelBulkJob } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListBulkJobsQueryKey } from "@workspace/api-client-react";
-import { Zap, XCircle, Film, Quote, LayoutList, Upload, Sparkles, FileText, ChevronDown, ChevronUp } from "lucide-react";
+import { Zap, XCircle, Film, Quote, LayoutList, Upload, Sparkles, FileText, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type JobMode       = "standard" | "quotes";
@@ -28,7 +28,9 @@ export default function BulkFactory() {
   const [mode,         setMode]         = useState<JobMode>("standard");
   const [quotesSource, setQuotesSource] = useState<QuotesSource>("ai");
   const [manualText,   setManualText]   = useState("");
-  const [form, setForm] = useState({ niche: "", totalVideos: "10", aspectRatio: "9:16", language: "English" });
+  const [form, setForm] = useState({
+    niche: "", totalVideos: "10", aspectRatio: "9:16", language: "English", quoteDuration: "15",
+  });
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
@@ -53,13 +55,14 @@ export default function BulkFactory() {
     createJob.mutate(
       {
         data: {
-          niche:       form.niche,
-          goal:        mode === "quotes" ? "quotes" : undefined,
-          totalVideos: videoCount,
-          aspectRatio: form.aspectRatio,
-          duration:    "60s",
-          language:    mode === "quotes" ? form.language : undefined,
-          quotes:      quotesPayload,
+          niche:         form.niche,
+          goal:          mode === "quotes" ? "quotes" : undefined,
+          totalVideos:   videoCount,
+          aspectRatio:   form.aspectRatio,
+          duration:      "60s",
+          language:      mode === "quotes" ? form.language : undefined,
+          quotes:        quotesPayload,
+          quoteDuration: mode === "quotes" ? form.quoteDuration : undefined,
         } as any,
       },
       {
@@ -142,7 +145,7 @@ export default function BulkFactory() {
 
             {/* Quantity only shown in standard mode or AI quotes mode */}
             {(!isManualMode) && (
-              <div className="w-36">
+              <div className="w-32">
                 <label className="text-xs font-medium text-gray-600 block mb-1.5">Quantity</label>
                 <Select value={form.totalVideos} onValueChange={v => set("totalVideos", v)}>
                   <SelectTrigger className="h-9 text-sm border-gray-200 bg-gray-50">
@@ -162,14 +165,14 @@ export default function BulkFactory() {
 
             {/* Manual mode: show parsed count instead */}
             {isManualMode && parsedQuotes.length > 0 && (
-              <div className="w-36 flex flex-col justify-end pb-0.5">
+              <div className="w-32 flex flex-col justify-end pb-0.5">
                 <span className="text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-center">
                   {parsedQuotes.length} quotes
                 </span>
               </div>
             )}
 
-            <div className="w-36">
+            <div className="w-32">
               <label className="text-xs font-medium text-gray-600 block mb-1.5">Format</label>
               <Select value={form.aspectRatio} onValueChange={v => set("aspectRatio", v)}>
                 <SelectTrigger className="h-9 text-sm border-gray-200 bg-gray-50">
@@ -184,7 +187,7 @@ export default function BulkFactory() {
             </div>
 
             {mode === "quotes" && (
-              <div className="w-36">
+              <div className="w-32">
                 <label className="text-xs font-medium text-gray-600 block mb-1.5">Language</label>
                 <Select value={form.language} onValueChange={v => set("language", v)}>
                   <SelectTrigger className="h-9 text-sm border-gray-200 bg-gray-50">
@@ -203,6 +206,29 @@ export default function BulkFactory() {
                     <SelectItem value="Japanese">Japanese</SelectItem>
                     <SelectItem value="Turkish">Turkish</SelectItem>
                     <SelectItem value="Indonesian">Indonesian</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Duration selector — only for quotes */}
+            {mode === "quotes" && (
+              <div className="w-32">
+                <label className="text-xs font-medium text-gray-600 flex items-center gap-1 mb-1.5">
+                  <Clock className="w-3 h-3" /> Duration
+                </label>
+                <Select value={form.quoteDuration} onValueChange={v => set("quoteDuration", v)}>
+                  <SelectTrigger className="h-9 text-sm border-gray-200 bg-gray-50">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="8">8 seconds</SelectItem>
+                    <SelectItem value="12">12 seconds</SelectItem>
+                    <SelectItem value="15">15 seconds</SelectItem>
+                    <SelectItem value="20">20 seconds</SelectItem>
+                    <SelectItem value="30">30 seconds</SelectItem>
+                    <SelectItem value="45">45 seconds</SelectItem>
+                    <SelectItem value="60">60 seconds</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

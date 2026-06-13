@@ -58,14 +58,15 @@ router.post("/bulk-jobs", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const { niche, goal, totalVideos, aspectRatio, language, quotes } = parsed.data as any;
+  const { niche, goal, totalVideos, aspectRatio, language, quotes, quoteDuration } = parsed.data as any;
 
   // Manual quotes override totalVideos
   const manualQuotes: string[] | null =
     Array.isArray(quotes) && quotes.length > 0
       ? (quotes as string[]).map((q: string) => String(q).trim()).filter(Boolean)
       : null;
-  const videoCount = manualQuotes ? manualQuotes.length : (totalVideos ?? 10);
+  const videoCount     = manualQuotes ? manualQuotes.length : (totalVideos ?? 10);
+  const quoteDurSecs   = Math.max(8, Math.min(120, parseInt(quoteDuration ?? "15", 10) || 15));
 
   const [job] = await db.insert(bulkJobsTable).values({
     niche,
@@ -82,7 +83,7 @@ router.post("/bulk-jobs", async (req, res): Promise<void> => {
   const lang = language    ?? "English";
 
   if (goal === "quotes") {
-    runBulkQuotesPipeline(job.id, niche, videoCount, ar, lang, manualQuotes).catch(() => {});
+    runBulkQuotesPipeline(job.id, niche, videoCount, ar, lang, manualQuotes, quoteDurSecs).catch(() => {});
   } else {
     runBulkPipeline(job.id, niche, videoCount, ar).catch(() => {});
   }
@@ -179,7 +180,7 @@ async function runBulkPipeline(jobId: number, niche: string, totalVideos: number
           }),
         });
         if (!createRes.ok) throw new Error("project create failed");
-        const project = await createRes.json();
+        const project = await createRes.json() as any;
         const pid     = project.id;
 
         await fetch(`${BASE}/api/projects/${pid}/generate-assets`,    { method: "POST" });
@@ -196,7 +197,7 @@ async function runBulkPipeline(jobId: number, niche: string, totalVideos: number
         while (RUNNING.has(finalStatus) && attempts < 96) {
           await sleep(5000);
           const r  = await fetch(`${BASE}/api/projects/${pid}`);
-          finalStatus = (await r.json()).status ?? "error";
+          finalStatus = ((await r.json()) as any).status ?? "error";
           attempts++;
         }
         if (finalStatus !== "completed") throw new Error(`project ended with status: ${finalStatus}`);
@@ -229,7 +230,7 @@ async function runBulkPipeline(jobId: number, niche: string, totalVideos: number
 // ── Quotes bulk pipeline ──────────────────────────────────────────────────────
 async function runBulkQuotesPipeline(
   jobId: number, topic: string, totalVideos: number, aspectRatio: string,
-  language = "English", manualQuotes: string[] | null = null,
+  language = "English", manualQuotes: string[] | null = null, quoteDurationSecs = 15,
 ) {
   const CONCURRENCY  = 2;
   const OUTPUTS_DIR  = "/tmp/quote-outputs";
@@ -258,6 +259,7 @@ async function runBulkQuotesPipeline(
 
     const { stdout, stderr } = await execFileAsync("python3", [
       scriptPath, quoteText, bgUrl, musicUrl, outputPath, aspectRatio, language,
+      String(quoteDurationSecs),
     ], { timeout: 240_000 });
 
     if (stderr) console.error(`[bulk-quotes] video ${index} stderr:`, stderr.slice(-400));
@@ -328,7 +330,7 @@ async function generateQuotes(topic: string, count: number, language = "English"
     });
 
     if (res.ok) {
-      const data    = await res.json();
+      const data    = await res.json() as any;
       const content: string = data.choices?.[0]?.message?.content ?? "";
       const jsonMatch = content.match(/\[[\s\S]*\]/);
       if (jsonMatch) {
@@ -373,6 +375,23 @@ async function markFinished(jobId: number, completedCount: number, failedCount: 
 }
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
+
+// ── POST /api/bulk-jobs/cleanup — purge outputs whose files no longer exist ───
+router.post("/bulk-jobs/cleanup", async (_req, res): Promise<void> => {
+  try {
+    const outputs = await db.select().from(bulkJobOutputsTable);
+    const staleIds = outputs
+      .filter(o => !fs.existsSync(o.filePath))
+      .map(o => o.id);
+    if (staleIds.length > 0) {
+      const { inArray } = await import("drizzle-orm");
+      await db.delete(bulkJobOutputsTable).where(inArray(bulkJobOutputsTable.id, staleIds));
+    }
+    res.json({ deleted: staleIds.length });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 function serializeBulkJob(j: typeof bulkJobsTable.$inferSelect) {
   return {
