@@ -607,7 +607,7 @@ export default function ClipperPage() {
           )}
 
           {/* Clips Grid */}
-          {job && job.clips.length > 0 && (
+          {job && (job.clips?.length ?? 0) > 0 && (
             <div className="space-y-3">
               {isDone && (
                 <div className="flex items-center gap-2 px-1">
