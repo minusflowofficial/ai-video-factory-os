@@ -6,7 +6,7 @@ import {
   Scissors, Loader2, Download, AlertCircle,
   CheckCircle2, Clock, TrendingUp, Sparkles, Film,
   ChevronDown, ChevronUp, Copy, Check, Cookie,
-  Upload, Link2, X,
+  Upload, Link2, X, Play, FileText, Hash,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -15,6 +15,9 @@ interface ClipResult {
   viralScore: number; startTime: string; endTime: string; duration: string;
   status: "pending" | "processing" | "done" | "error";
   downloadToken?: string; sizeMb?: number; error?: string;
+  suggestedTitle?: string;
+  hashtags?: string[];
+  description?: string;
 }
 interface JobStatus {
   id: string;
@@ -479,74 +482,171 @@ export default function ClipperPage() {
                   <span className="text-xs text-gray-400">· {aspectRatio} · {captionStyle}</span>
                 </div>
               )}
-              {job.clips.map(clip => (
-                <div key={clip.id} className={cn("bg-white rounded-xl border shadow-sm transition-all",
-                  clip.status === "done" ? "border-emerald-200" : clip.status === "processing" ? "border-amber-200" : clip.status === "error" ? "border-red-200" : "border-gray-100"
-                )}>
-                  <div className="flex items-center gap-3 p-4 cursor-pointer" onClick={() => setExpanded(expanded === clip.id ? null : clip.id)}>
-                    <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
-                      clip.status === "done" ? "bg-emerald-50" : clip.status === "processing" ? "bg-amber-50" : clip.status === "error" ? "bg-red-50" : "bg-gray-50"
+
+              {/* 2-column grid */}
+              <div className="grid grid-cols-2 gap-3">
+                {job.clips.map(clip => {
+                  const isExpanded = expanded === clip.id;
+                  const isDoneClip = clip.status === "done" && !!clip.downloadToken;
+                  return (
+                    <div key={clip.id} className={cn(
+                      "bg-white rounded-xl border shadow-sm overflow-hidden flex flex-col transition-all",
+                      isDoneClip ? "border-emerald-200" :
+                      clip.status === "processing" ? "border-amber-200" :
+                      clip.status === "error" ? "border-red-200" : "border-gray-100"
                     )}>
-                      {clip.status === "done" ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> :
-                       clip.status === "processing" ? <Loader2 className="w-4 h-4 text-amber-500 animate-spin" /> :
-                       clip.status === "error" ? <AlertCircle className="w-4 h-4 text-red-500" /> :
-                       <Clock className="w-4 h-4 text-gray-300" />}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-gray-900 truncate">{clip.title}</p>
-                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                        <span className="text-xs font-mono text-amber-600">{clip.startTime} → {clip.endTime}</span>
-                        <span className="text-[10px] text-gray-400">({clip.duration})</span>
-                        {clip.hookType && (
-                          <span className={cn("text-[10px] px-1.5 py-0.5 rounded border font-semibold", HOOK_COLORS[clip.hookType] ?? "bg-gray-50 text-gray-500 border-gray-100")}>{clip.hookType}</span>
+
+                      {/* ── Video preview area ── */}
+                      <div className={cn(
+                        "relative bg-black overflow-hidden",
+                        aspectRatio === "9:16" ? "aspect-[9/16]" : aspectRatio === "1:1" ? "aspect-square" : "aspect-video"
+                      )}>
+                        {isDoneClip ? (
+                          <>
+                            <video
+                              key={clip.downloadToken}
+                              src={`/api/clipper/preview/${clip.downloadToken}`}
+                              preload="metadata"
+                              className="w-full h-full object-cover"
+                            />
+                            {/* Viral score badge */}
+                            <div className={cn(
+                              "absolute top-2 right-2 text-xs font-black px-2 py-0.5 rounded-full",
+                              clip.viralScore >= 9 ? "bg-emerald-500 text-white" :
+                              clip.viralScore >= 7 ? "bg-amber-400 text-amber-950" : "bg-gray-700 text-gray-200"
+                            )}>{clip.viralScore}/10</div>
+                            {/* Duration badge */}
+                            <div className="absolute bottom-2 left-2 text-[10px] font-bold bg-black/70 text-white px-2 py-0.5 rounded-full">{clip.duration}</div>
+                            {/* Hook type */}
+                            {clip.hookType && (
+                              <div className={cn(
+                                "absolute bottom-2 right-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full border",
+                                HOOK_COLORS[clip.hookType] ?? "bg-gray-50 text-gray-500 border-gray-100"
+                              )}>{clip.hookType}</div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="w-full h-full flex flex-col items-center justify-center gap-2">
+                            {clip.status === "processing" ? (
+                              <><Loader2 className="w-7 h-7 text-amber-400 animate-spin" /><span className="text-[10px] text-amber-400 font-medium">Processing…</span></>
+                            ) : clip.status === "error" ? (
+                              <><AlertCircle className="w-7 h-7 text-red-400" /><span className="text-[10px] text-red-400">Failed</span></>
+                            ) : (
+                              <><Clock className="w-7 h-7 text-gray-600" /><span className="text-[10px] text-gray-500">Queued</span></>
+                            )}
+                          </div>
                         )}
                       </div>
-                    </div>
-                    <div className="text-center mr-1">
-                      <div className={cn("text-lg font-black", clip.viralScore >= 9 ? "text-emerald-500" : clip.viralScore >= 7 ? "text-amber-500" : "text-gray-400")}>{clip.viralScore}/10</div>
-                      <div className="text-[9px] text-gray-400">viral</div>
-                    </div>
-                    {clip.status === "done" && clip.downloadToken ? (
-                      <a href={`/api/clipper/download/${clip.downloadToken}`} download="clip.mp4" onClick={e => e.stopPropagation()}
-                        className="flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold px-3 py-2 rounded-lg transition-colors">
-                        <Download className="w-3.5 h-3.5" />{clip.sizeMb ? `${clip.sizeMb}MB` : "Download"}
-                      </a>
-                    ) : (
-                      <span className={cn("text-xs px-3 py-1.5 rounded-lg font-medium border",
-                        clip.status === "processing" ? "bg-amber-50 text-amber-700 border-amber-200" :
-                        clip.status === "error"      ? "bg-red-50 text-red-600 border-red-100" :
-                                                       "bg-gray-50 text-gray-400 border-gray-100"
-                      )}>{clip.status === "processing" ? "Processing…" : clip.status === "error" ? "Failed" : "Queued"}</span>
-                    )}
-                    <div className="text-gray-300">{expanded === clip.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</div>
-                  </div>
-                  {expanded === clip.id && (
-                    <div className="border-t border-gray-100 px-4 pb-4 pt-3 space-y-3">
-                      {/* Inline video preview */}
-                      {clip.status === "done" && clip.downloadToken && (
-                        <div className="rounded-xl overflow-hidden bg-black">
-                          <video
-                            key={clip.downloadToken}
-                            src={`/api/clipper/preview/${clip.downloadToken}`}
-                            controls
-                            preload="metadata"
-                            className={cn("w-full max-h-[420px]", aspectRatio === "9:16" ? "max-w-[240px] mx-auto" : aspectRatio === "1:1" ? "max-w-[360px] mx-auto" : "w-full")}
-                          />
-                        </div>
-                      )}
-                      {clip.hook && (
-                        <div className="flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
-                          <div className="flex-1"><p className="text-[10px] font-bold text-amber-600 uppercase tracking-wide mb-0.5">Opening Hook</p><p className="text-sm font-semibold text-gray-800">"{clip.hook}"</p></div>
-                          <button onClick={() => copyText(clip.hook, `hook-${clip.id}`)} className="p-1.5 rounded-lg hover:bg-amber-100 text-amber-400 hover:text-amber-600">
-                            {copied === `hook-${clip.id}` ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+
+                      {/* ── Card body ── */}
+                      <div className="flex flex-col flex-1 p-3 gap-2">
+
+                        {/* Topic title */}
+                        <p className="text-xs font-semibold text-gray-800 leading-snug line-clamp-2">{clip.title}</p>
+
+                        {/* Suggested platform title */}
+                        {clip.suggestedTitle && (
+                          <div className="flex items-start gap-1.5">
+                            <FileText className="w-3 h-3 text-amber-500 mt-0.5 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-1">
+                                <p className="text-[9px] font-bold text-amber-600 uppercase tracking-wider">Title</p>
+                                <button onClick={() => copyText(clip.suggestedTitle ?? "", `title-${clip.id}`)} className="text-gray-300 hover:text-amber-500 transition-colors">
+                                  {copied === `title-${clip.id}` ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                                </button>
+                              </div>
+                              <p className="text-[10px] text-gray-700 font-medium leading-tight line-clamp-2">{clip.suggestedTitle}</p>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Hashtags */}
+                        {clip.hashtags && clip.hashtags.length > 0 && (
+                          <div className="flex items-start gap-1">
+                            <Hash className="w-3 h-3 text-blue-400 mt-0.5 shrink-0" />
+                            <div className="flex flex-wrap gap-1 flex-1">
+                              {clip.hashtags.slice(0, 6).map(tag => (
+                                <button key={tag} onClick={() => copyText(tag, `tag-${clip.id}-${tag}`)}
+                                  className="text-[9px] font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-100 rounded-full px-1.5 py-0.5 transition-colors">
+                                  {tag}
+                                </button>
+                              ))}
+                              {copied?.startsWith(`tag-${clip.id}-`) && (
+                                <span className="text-[9px] text-emerald-600 font-medium self-center">Copied!</span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Copy all hashtags button */}
+                        {clip.hashtags && clip.hashtags.length > 0 && (
+                          <button onClick={() => copyText((clip.hashtags ?? []).join(" "), `tags-all-${clip.id}`)}
+                            className="text-[9px] text-blue-500 hover:text-blue-700 font-semibold flex items-center gap-1 self-start">
+                            {copied === `tags-all-${clip.id}` ? <Check className="w-2.5 h-2.5 text-emerald-500" /> : <Copy className="w-2.5 h-2.5" />}
+                            {copied === `tags-all-${clip.id}` ? "Copied!" : "Copy all hashtags"}
                           </button>
+                        )}
+
+                        {/* Description (expandable) */}
+                        {clip.description && (
+                          <div>
+                            <button onClick={() => setExpanded(isExpanded ? null : clip.id)}
+                              className="flex items-center gap-1 text-[9px] font-bold text-gray-400 hover:text-gray-600 uppercase tracking-wider transition-colors w-full text-left">
+                              <FileText className="w-3 h-3" />
+                              Description
+                              {isExpanded ? <ChevronUp className="w-3 h-3 ml-auto" /> : <ChevronDown className="w-3 h-3 ml-auto" />}
+                            </button>
+                            {isExpanded && (
+                              <div className="mt-1.5 bg-gray-50 rounded-lg px-2.5 py-2 border border-gray-100">
+                                <div className="flex items-start justify-between gap-1">
+                                  <p className="text-[10px] text-gray-600 leading-relaxed flex-1">{clip.description}</p>
+                                  <button onClick={() => copyText(clip.description ?? "", `desc-${clip.id}`)} className="text-gray-300 hover:text-amber-500 transition-colors shrink-0 mt-0.5">
+                                    {copied === `desc-${clip.id}` ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Hook */}
+                        {clip.hook && (
+                          <div className="bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-1.5 flex items-start gap-1.5">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[8px] font-bold text-amber-600 uppercase tracking-wider">Hook</p>
+                              <p className="text-[10px] font-semibold text-gray-800 leading-snug">"{clip.hook}"</p>
+                            </div>
+                            <button onClick={() => copyText(clip.hook, `hook-${clip.id}`)} className="text-amber-300 hover:text-amber-600 shrink-0 mt-0.5">
+                              {copied === `hook-${clip.id}` ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                            </button>
+                          </div>
+                        )}
+
+                        {clip.error && <div className="text-[9px] text-red-600 bg-red-50 border border-red-100 rounded-lg px-2 py-1.5">{clip.error}</div>}
+
+                        {/* ── Bottom actions ── */}
+                        <div className="flex items-center gap-2 mt-auto pt-1 border-t border-gray-50">
+                          <span className="text-[9px] text-gray-400 font-mono">{clip.startTime}→{clip.endTime}</span>
+                          <div className="flex-1" />
+                          {isDoneClip ? (
+                            <a href={`/api/clipper/download/${clip.downloadToken}`} download="clip.mp4"
+                              className="flex items-center gap-1 bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] font-bold px-2.5 py-1.5 rounded-lg transition-colors">
+                              <Download className="w-3 h-3" />
+                              {clip.sizeMb ? `${clip.sizeMb}MB` : "Download"}
+                            </a>
+                          ) : (
+                            <span className={cn("text-[10px] px-2 py-1 rounded-lg font-medium border",
+                              clip.status === "processing" ? "bg-amber-50 text-amber-700 border-amber-200" :
+                              clip.status === "error" ? "bg-red-50 text-red-600 border-red-100" :
+                              "bg-gray-50 text-gray-400 border-gray-100"
+                            )}>{clip.status === "processing" ? "Processing…" : clip.status === "error" ? "Failed" : "Queued"}</span>
+                          )}
                         </div>
-                      )}
-                      {clip.error && <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{clip.error}</div>}
+                      </div>
                     </div>
-                  )}
-                </div>
-              ))}
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>

@@ -254,7 +254,19 @@ TRANSCRIPT (timestamps in MM:SS or HH:MM:SS):
 ${transcriptText || "No transcript — choose timestamps spread evenly across the video."}
 
 Return ONLY a JSON array (no other text):
-[{"id":1,"startTime":"00:01:23","endTime":"00:01:53","duration":"30s","topic":"one sentence","hookType":"Curiosity","viralScore":9,"hook":"hook under 12 words"}]` },
+[{
+  "id":1,
+  "startTime":"00:01:23",
+  "endTime":"00:01:53",
+  "duration":"30s",
+  "topic":"one sentence description",
+  "hookType":"Curiosity",
+  "viralScore":9,
+  "hook":"opening hook under 12 words",
+  "suggestedTitle":"Catchy YouTube/TikTok title for this clip",
+  "hashtags":["#viral","#trending","#topic","#niche","#shorts"],
+  "description":"2-3 sentence caption/description for this clip that can be copy-pasted to YouTube Shorts or TikTok. Include the hook, what viewers will learn, and end with a soft CTA."
+}]` },
       ],
     }),
   });
@@ -373,6 +385,9 @@ async function runPipeline(job: ClipJob, opts: {
       id: c.id, title: c.topic ?? `Clip ${c.id}`, hook: c.hook ?? "",
       hookType: c.hookType ?? "Curiosity", viralScore: c.viralScore ?? 7,
       startTime: c.startTime, endTime: c.endTime, duration: c.duration ?? "",
+      suggestedTitle: c.suggestedTitle ?? c.topic ?? "",
+      hashtags: Array.isArray(c.hashtags) ? c.hashtags : [],
+      description: c.description ?? "",
       status: "pending" as const,
     }));
     job.status    = "creating";
@@ -488,6 +503,9 @@ router.get("/clipper/status/:jobId", (req, res): void => {
       viralScore: c.viralScore, startTime: c.startTime, endTime: c.endTime,
       duration: c.duration, status: c.status, downloadToken: c.downloadToken,
       sizeMb: c.sizeMb, error: c.error,
+      suggestedTitle: (c as any).suggestedTitle ?? "",
+      hashtags: (c as any).hashtags ?? [],
+      description: (c as any).description ?? "",
     })),
   });
 });
