@@ -156,7 +156,8 @@ export async function searchMixkitVideos(keywords: string[], count: number): Pro
   // Add fallback IDs to the pool so we always have candidates
   FALLBACK_VIDEO_IDS.forEach(id => candidateSet.add(id));
 
-  const candidates = [...candidateSet];
+  // Shuffle for variety — each call gets a different random order from the same pool
+  const candidates = [...candidateSet].sort(() => Math.random() - 0.5);
   const verified   = await verifyVideoIds(candidates, count);
 
   // Ultimate safety net: if verification fails entirely, return unverified fallbacks

@@ -290,21 +290,37 @@ export default function StudioEditor() {
   // ── Custom video upload to B-Roll ─────────────────────────────────────────
   const handleCustomVideoUpload = async (file: File) => {
     if (!file.type.startsWith("video/")) return;
+    // Warn on very large files — proxy limit is ~500 MB
+    if (file.size > 500 * 1024 * 1024) {
+      alert("File is too large (max 500 MB). Please compress or trim the video first.");
+      return;
+    }
     setCustomUploading(true);
     try {
       const form = new FormData();
       form.append("video", file);
       const res = await fetch("/api/studio/upload-video", { method: "POST", body: form });
-      if (!res.ok) return;
-      const data = await res.json();
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "Upload failed");
+        alert(`Upload error: ${errText}`);
+        return;
+      }
+      let data: { url: string };
+      try {
+        data = await res.json();
+      } catch {
+        alert("Upload failed: server returned an invalid response. The file may be too large.");
+        return;
+      }
       const newAsset = { id: Date.now(), type: "video", url: data.url, thumbnail: data.url, source: "custom", keyword: file.name.replace(/\.[^.]+$/, "") };
-      const currentAssets = assets.length ? assets : [];
-      const updatedAssets = [...currentAssets, newAsset];
+      const updatedAssets = [...(assets.length ? assets : []), newAsset];
       await fetch(`/api/projects/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ assets: JSON.stringify(updatedAssets) }),
       }).then(r => r.json()).then(setCache);
+    } catch (err) {
+      alert(`Upload failed: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally { setCustomUploading(false); }
   };
 
