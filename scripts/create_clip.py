@@ -25,6 +25,12 @@ try:
 except ImportError:
     CV2_OK = False
 
+try:
+    import mediapipe as mp
+    MEDIAPIPE_OK = True
+except ImportError:
+    MEDIAPIPE_OK = False
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def time_to_seconds(t: str) -> float:
@@ -43,28 +49,33 @@ def ass_ts(s: float) -> str:
     cs = min(99, int(round((sc - int(sc)) * 100)))
     return f"{h}:{m:02d}:{int(sc):02d}.{cs:02d}"
 
-# ── Vibrant per-word color palette (ASS &HAABBGGRR override-tag format) ─────────
-# AABBGGRR: AA=alpha(00=opaque), BB=blue, GG=green, RR=red
-# Outline is ALWAYS forced black so all colors remain readable against any bg.
-CAPTION_COLORS = [
-    "c&H000000FF&",  # Red    (RR=FF)
-    "c&H0000FFFF&",  # Yellow (RR=FF GG=FF)
-    "c&H0000FF00&",  # Green  (GG=FF)
-    "c&H00FFFFFF&",  # White
-    "c&H000080FF&",  # Orange (RR=FF GG=80)
-    "c&H00FFFF00&",  # Cyan   (GG=FF BB=FF)
+# ── ASS color tags (&HAABBGGRR — AA=00 opaque, BB/GG/RR = blue/green/red) ────────
+# Base = white.  Every 3rd word globally gets one accent colour (Red → Yellow → Green).
+# Black thick outline makes every colour pop on any background.
+_WHITE   = "c&H00FFFFFF&"   # white — base for most words
+_ACCENTS = [
+    "c&H000000FF&",  # Red
+    "c&H0000FFFF&",  # Yellow
+    "c&H0000FF00&",  # Green
 ]
 
 
 def colorize_words(text: str, start_idx: int) -> str:
     """
-    Wrap each word in an ASS primary-colour override tag, cycling through the palette.
-    Produces: {\\c&H000000FF&}WORD1 {\\c&H0000FFFF&}WORD2  …
+    White base with selective accent pop.
+    Every 3rd word (using global start_idx) gets Red / Yellow / Green;
+    the rest stay white.  Thick black outline makes every colour readable.
     """
-    words = text.split()
-    parts = []
+    words  = text.split()
+    parts  = []
+    # how many accent colours have already been emitted before this chunk
+    accent = sum(1 for j in range(start_idx) if j % 3 == 2)
     for i, word in enumerate(words):
-        c = CAPTION_COLORS[(start_idx + i) % len(CAPTION_COLORS)]
+        if (start_idx + i) % 3 == 2:
+            c      = _ACCENTS[accent % len(_ACCENTS)]
+            accent += 1
+        else:
+            c = _WHITE
         parts.append("{\\%s}%s" % (c, word))
     return " ".join(parts) if parts else text
 
@@ -76,37 +87,60 @@ ASPECT_CONFIGS = {
 
 # ── Face detection ─────────────────────────────────────────────────────────────
 
-def detect_face_clusters(video_path: str, num_samples: int = 10):
+def detect_face_clusters(video_path: str, num_samples: int = 12):
+    """
+    Detect face centres using MediaPipe (preferred, deep-learning accuracy)
+    with OpenCV Haar-cascade as fallback.
+    Returns (centres, src_w, src_h).
+    """
     if not CV2_OK:
         return [], 0, 0
     try:
-        cap    = cv2.VideoCapture(video_path)
-        total  = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        src_w  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        src_h  = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap   = cv2.VideoCapture(video_path)
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        src_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        cascade = cv2.CascadeClassifier(cascade_path)
+        centres        = []
+        sample_indices = [int(total * i / (num_samples + 1)) for i in range(1, num_samples + 1)]
 
-        centres = []
-        sample_indices = [int(total * i / num_samples) for i in range(1, num_samples)]
-
-        for fidx in sample_indices:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, fidx)
-            ret, frame = cap.read()
-            if not ret:
-                continue
-            small = cv2.resize(frame, (320, int(frame.shape[0] * 320 / frame.shape[1])))
-            gray  = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
-            scale_x = src_w / small.shape[1]
-            scale_y = src_h / small.shape[0]
-            faces = cascade.detectMultiScale(
-                gray, scaleFactor=1.1, minNeighbors=4, minSize=(20, 20)
+        if MEDIAPIPE_OK:
+            mp_face = mp.solutions.face_detection
+            with mp_face.FaceDetection(model_selection=1,
+                                       min_detection_confidence=0.35) as detector:
+                for fidx in sample_indices:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, fidx)
+                    ret, frame = cap.read()
+                    if not ret:
+                        continue
+                    rgb     = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    results = detector.process(rgb)
+                    if results.detections:
+                        for det in results.detections:
+                            bb = det.location_data.relative_bounding_box
+                            rx = max(0.0, min(1.0, bb.xmin + bb.width  / 2))
+                            ry = max(0.0, min(1.0, bb.ymin + bb.height / 2))
+                            centres.append((int(rx * src_w), int(ry * src_h)))
+        else:
+            # OpenCV Haar cascade fallback
+            cascade = cv2.CascadeClassifier(
+                cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
             )
-            for (fx, fy, fw, fh) in faces:
-                cx = int((fx + fw / 2) * scale_x)
-                cy = int((fy + fh / 2) * scale_y)
-                centres.append((cx, cy))
+            for fidx in sample_indices:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, fidx)
+                ret, frame = cap.read()
+                if not ret:
+                    continue
+                small   = cv2.resize(frame, (320, int(frame.shape[0] * 320 / frame.shape[1])))
+                gray    = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+                scale_x = src_w / small.shape[1]
+                scale_y = src_h / small.shape[0]
+                faces   = cascade.detectMultiScale(
+                    gray, scaleFactor=1.1, minNeighbors=4, minSize=(20, 20)
+                )
+                for (fx, fy, fw, fh) in faces:
+                    centres.append((int((fx + fw / 2) * scale_x),
+                                    int((fy + fh / 2) * scale_y)))
 
         cap.release()
         return centres, src_w, src_h

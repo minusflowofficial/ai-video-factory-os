@@ -12,19 +12,44 @@ import shutil
 import urllib.request
 from PIL import Image, ImageDraw, ImageFont
 
-SCRIPT_DIR      = os.path.dirname(os.path.abspath(__file__))
-FONT_PATH       = os.path.join(SCRIPT_DIR, "fonts", "NotoSansJP-Regular.otf")
-FONT_FALLBACK   = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+SCRIPT_DIR    = os.path.dirname(os.path.abspath(__file__))
+FONTS_DIR     = os.path.join(SCRIPT_DIR, "fonts")
+FONT_FALLBACK = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
+# ── Per-script font map ─────────────────────────────────────────────────────────
+FONT_MAP = {
+    "arabic":     os.path.join(FONTS_DIR, "NotoSansArabic-Bold.ttf"),   # Arabic, Urdu, Persian
+    "devanagari": os.path.join(FONTS_DIR, "NotoSerifDevanagari-Bold.ttf"),  # Hindi
+    "latin":      os.path.join(FONTS_DIR, "Montserrat-Bold.ttf"),       # English + European
+    "cjk":        os.path.join(FONTS_DIR, "NotoSansJP-Regular.otf"),    # Japanese/Chinese/Korean
+    "default":    os.path.join(FONTS_DIR, "NotoSansJP-Regular.otf"),    # Fallback (covers most)
+}
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
+def detect_script(text: str) -> str:
+    """Return dominant Unicode script category for font selection."""
+    arabic     = sum(1 for c in text if "\u0600" <= c <= "\u06FF")  # Arabic/Urdu
+    devanagari = sum(1 for c in text if "\u0900" <= c <= "\u097F")  # Hindi
+    cjk        = sum(1 for c in text if "\u4E00" <= c <= "\u9FFF")  # CJK
+    latin      = sum(1 for c in text if c.isascii() and c.isalpha())
+    scores = {"arabic": arabic, "devanagari": devanagari, "cjk": cjk, "latin": latin}
+    dominant = max(scores, key=scores.get)
+    return dominant if scores[dominant] > 0 else "default"
 
-def get_font(size: int) -> ImageFont.FreeTypeFont:
-    path = FONT_PATH if os.path.exists(FONT_PATH) else FONT_FALLBACK
+
+def get_font(size: int, script: str = "default") -> ImageFont.FreeTypeFont:
+    path = FONT_MAP.get(script, FONT_MAP["default"])
+    if not os.path.exists(path):
+        path = FONT_MAP["default"]
+    if not os.path.exists(path):
+        path = FONT_FALLBACK
     try:
         return ImageFont.truetype(path, size)
     except Exception:
-        return ImageFont.load_default()
+        try:
+            return ImageFont.truetype(FONT_FALLBACK, size)
+        except Exception:
+            return ImageFont.load_default()
 
 
 def dl(url: str, dest: str, timeout: int = 60):
@@ -86,10 +111,14 @@ def draw_rounded_rect(draw: ImageDraw.ImageDraw, xy: tuple,
 def create_overlay(quote: str, author: str, w: int, h: int) -> Image.Image:
     """
     Returns a transparent RGBA image (w×h) with a centered quote card.
-    Design: rounded dark card · big gold " " · white body text · gold divider · amber author line
+    Design: rounded dark card · big gold " " · white body text · gold divider · amber author line.
+    Font is chosen automatically by detecting the dominant script in the quote text.
     """
     img  = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
+
+    # ── Auto-detect script for language-matched font ───────────────────────────
+    script = detect_script(quote + " " + author)
 
     # ── Font sizes ─────────────────────────────────────────────────────────────
     ref          = min(w, h)
@@ -97,9 +126,9 @@ def create_overlay(quote: str, author: str, w: int, h: int) -> Image.Image:
     body_size    = max(40,  int(ref * 0.048))  # quote body
     author_size  = max(28,  int(ref * 0.030))  # author / attribution
 
-    font_qmark  = get_font(qmark_size)
-    font_body   = get_font(body_size)
-    font_author = get_font(author_size)
+    font_qmark  = get_font(qmark_size, "latin")   # curly quote always looks best in Latin font
+    font_body   = get_font(body_size,  script)
+    font_author = get_font(author_size, script)
 
     # ── Safe margins & card width ──────────────────────────────────────────────
     side_mg  = int(w * 0.08)                   # 8 % each side
