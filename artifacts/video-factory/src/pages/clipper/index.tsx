@@ -29,6 +29,7 @@ interface JobStatus {
   stepLabel: string; progress: number;
   totalClips: number; doneClips: number;
   videoTitle?: string; error?: string;
+  createdAt?: number;
   clips: ClipResult[];
 }
 
@@ -98,9 +99,16 @@ export default function ClipperPage() {
   const [cookiesSaved,  setCookiesSaved]  = useState(false);
   const [history,      setHistory]     = useState<HistoryRow[]>([]);
   const [showHistory,  setShowHistory] = useState(false);
+  const [now,          setNow]         = useState(Date.now());
 
   const pollRef    = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInput  = useRef<HTMLInputElement>(null);
+
+  // Tick every 30 s so expiry timers stay fresh
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   // Load history on mount
   useEffect(() => {
@@ -642,13 +650,26 @@ export default function ClipperPage() {
           )}
 
           {/* Clips Grid */}
-          {job && (job.clips?.length ?? 0) > 0 && (
+          {job && (job.clips?.length ?? 0) > 0 && (() => {
+            const expiresAt  = (job.createdAt ?? 0) + 4 * 60 * 60 * 1000;
+            const msLeft     = expiresAt - now;
+            const isExpired  = msLeft <= 0;
+            const hLeft      = Math.floor(msLeft / 3600000);
+            const mLeft      = Math.floor((msLeft % 3600000) / 60000);
+            const timerLabel = isExpired ? "Links expired" : hLeft > 0 ? `${hLeft}h ${mLeft}m left` : `${mLeft}m left`;
+            const timerColor = isExpired ? "bg-red-50 border-red-200 text-red-600" : hLeft >= 2 ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-amber-50 border-amber-200 text-amber-700";
+            return (
             <div className="space-y-3">
               {isDone && (
-                <div className="flex items-center gap-2 px-1">
+                <div className="flex items-center gap-2 px-1 flex-wrap">
                   <CheckCircle2 className="w-4 h-4 text-emerald-500" />
                   <span className="text-sm font-semibold text-gray-800">{job.doneClips} clip{job.doneClips !== 1 ? "s" : ""} ready</span>
                   <span className="text-xs text-gray-400">· {aspectRatio} · {captionStyle}</span>
+                  {job.createdAt && (
+                    <span className={cn("ml-auto inline-flex items-center gap-1 text-[11px] font-semibold border px-2 py-0.5 rounded-full", timerColor)}>
+                      <Clock className="w-3 h-3" />{timerLabel}
+                    </span>
+                  )}
                 </div>
               )}
 
@@ -762,7 +783,7 @@ export default function ClipperPage() {
                         )}
 
                         {/* Download */}
-                        <div className="mt-auto pt-1 border-t border-gray-50">
+                        <div className="mt-auto pt-1 border-t border-gray-50 space-y-1">
                           {isDoneClip ? (
                             <a href={`/api/clipper/download/${clip.downloadToken}`} download="clip.mp4"
                               className="flex items-center justify-center gap-1 w-full bg-emerald-500 hover:bg-emerald-600 text-white text-[9px] font-bold py-1.5 rounded-lg transition-colors">
@@ -778,6 +799,15 @@ export default function ClipperPage() {
                               {clip.status === "processing" ? "Processing…" : clip.status === "error" ? "Failed" : "Queued"}
                             </div>
                           )}
+                          {isDoneClip && job.createdAt && (
+                            <div className={cn(
+                              "flex items-center justify-center gap-0.5 text-[8px] font-semibold rounded px-1 py-0.5",
+                              isExpired ? "text-red-400" : hLeft >= 2 ? "text-emerald-500" : "text-amber-500",
+                            )}>
+                              <Clock className="w-2 h-2" />
+                              {timerLabel}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -785,7 +815,8 @@ export default function ClipperPage() {
                 })}
               </div>
             </div>
-          )}
+            );
+          })()}
         </div>
       </div>
     </AppLayout>

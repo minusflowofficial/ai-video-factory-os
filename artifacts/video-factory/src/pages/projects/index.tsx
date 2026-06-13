@@ -10,7 +10,7 @@ import { getListProjectsQueryKey } from "@workspace/api-client-react";
 import {
   Film, Plus, Trash2, Clock, MonitorPlay, Smartphone, Square,
   FolderOpen, ChevronDown, ChevronRight, Download, Quote,
-  Scissors, Youtube, Upload as UploadIcon, LayoutList,
+  Scissors, Youtube, Upload as UploadIcon, LayoutList, Timer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -33,10 +33,36 @@ function ArIcon({ ar }: { ar?: string | null }) {
   return                      <MonitorPlay  className="w-3 h-3" />;
 }
 
+// ── Expiry helpers (clipper tokens live 4 h from job.createdAt) ─────────────────
+const CLIP_TTL_MS = 4 * 60 * 60 * 1000;
+
+function useNowTick(intervalMs = 30_000) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
+
+function clipperExpiryBadge(createdAtStr: string, now: number) {
+  const createdAt = new Date(createdAtStr).getTime();
+  const msLeft    = (createdAt + CLIP_TTL_MS) - now;
+  if (msLeft <= 0) return { text: "Expired", color: "text-red-400 bg-red-50 border-red-100" };
+  const h = Math.floor(msLeft / 3600000);
+  const m = Math.floor((msLeft % 3600000) / 60000);
+  const label = h > 0 ? `${h}h ${m}m left` : `${m}m left`;
+  const color = h >= 2
+    ? "text-emerald-600 bg-emerald-50 border-emerald-100"
+    : "text-amber-600 bg-amber-50 border-amber-100";
+  return { text: label, color };
+}
+
 export default function ProjectsHistory() {
   const [tab,    setTab]    = useState<PageTab>("studio");
   const [filter, setFilter] = useState("all");
   const queryClient         = useQueryClient();
+  const now                 = useNowTick();
 
   const { data: projects = [], isLoading } = useListProjects(filter !== "all" ? { status: filter } : undefined);
   const { data: bulkJobs = [] }             = useListBulkJobs({ query: { queryKey: ["bulk-jobs"] } });
@@ -363,12 +389,23 @@ export default function ProjectsHistory() {
                       <span className="text-[10px] font-medium bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
                         {session.captionStyle}
                       </span>
-                      <span className="text-[10px] text-gray-400">
+                          <span className="text-[10px] text-gray-400">
                         {session.doneClips}/{session.numClips} clips
                       </span>
                       <span className="text-[10px] text-gray-400">
                         {new Date(session.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                       </span>
+                      {(() => {
+                        const badge = clipperExpiryBadge(session.createdAt, now);
+                        return (
+                          <span className={cn(
+                            "inline-flex items-center gap-0.5 text-[10px] font-semibold border px-1.5 py-0.5 rounded-full",
+                            badge.color,
+                          )}>
+                            <Timer className="w-2.5 h-2.5" />{badge.text}
+                          </span>
+                        );
+                      })()}
                     </div>
                   </div>
 

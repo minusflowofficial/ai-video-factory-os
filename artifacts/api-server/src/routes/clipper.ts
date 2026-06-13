@@ -619,6 +619,7 @@ router.get("/clipper/status/:jobId", (req, res): void => {
     id: job.id, status: job.status, stepLabel: job.stepLabel,
     progress: job.progress, totalClips: job.totalClips, doneClips: job.doneClips,
     videoTitle: job.videoTitle, error: job.error,
+    createdAt: job.createdAt,
     clips: job.clips.map(c => ({
       id: c.id, title: c.title, hook: c.hook, hookType: c.hookType,
       viralScore: c.viralScore, startTime: c.startTime, endTime: c.endTime,

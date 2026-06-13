@@ -43,15 +43,30 @@ def ass_ts(s: float) -> str:
     cs = min(99, int(round((sc - int(sc)) * 100)))
     return f"{h}:{m:02d}:{int(sc):02d}.{cs:02d}"
 
-# ── ASS color &HAABBGGRR ───────────────────────────────────────────────────────
-STYLE_DEFS = {
-    "Bold Yellow":   ("&H0000FFFF", "&H00000000", 5, "&H00000000", 1),
-    "White Outline": ("&H00FFFFFF", "&H00000000", 4, "&H00000000", 1),
-    "Minimal":       ("&H00FFFFFF", "&H00000000", 2, "&H00000000", 1),
-    "Cinematic":     ("&H00FFFFFF", "&H00000000", 3, "&HAA000000", 3),
-    "Neon":          ("&H0000FF88", "&H00000000", 4, "&H00000000", 1),
-    "Fire":          ("&H000045FF", "&H000000AA", 5, "&H00000000", 1),
-}
+# ── Vibrant per-word color palette (ASS &HAABBGGRR override-tag format) ─────────
+# AABBGGRR: AA=alpha(00=opaque), BB=blue, GG=green, RR=red
+# Outline is ALWAYS forced black so all colors remain readable against any bg.
+CAPTION_COLORS = [
+    "c&H000000FF&",  # Red    (RR=FF)
+    "c&H0000FFFF&",  # Yellow (RR=FF GG=FF)
+    "c&H0000FF00&",  # Green  (GG=FF)
+    "c&H00FFFFFF&",  # White
+    "c&H000080FF&",  # Orange (RR=FF GG=80)
+    "c&H00FFFF00&",  # Cyan   (GG=FF BB=FF)
+]
+
+
+def colorize_words(text: str, start_idx: int) -> str:
+    """
+    Wrap each word in an ASS primary-colour override tag, cycling through the palette.
+    Produces: {\\c&H000000FF&}WORD1 {\\c&H0000FFFF&}WORD2  …
+    """
+    words = text.split()
+    parts = []
+    for i, word in enumerate(words):
+        c = CAPTION_COLORS[(start_idx + i) % len(CAPTION_COLORS)]
+        parts.append("{\\%s}%s" % (c, word))
+    return " ".join(parts) if parts else text
 
 ASPECT_CONFIGS = {
     "9:16":  (1080, 1920),
@@ -139,18 +154,18 @@ def get_actual_duration(path: str) -> float:
 def make_ass(captions, hook, clip_duration, target_w, target_h, cap_style,
              show_hook=True, hook_full_duration=False):
     ref     = min(target_w, target_h)
-    # Smaller font sizes to prevent overflow — hook slightly larger than captions
     hook_fs = max(32, int(ref * 0.046))
     cap_fs  = max(24, int(ref * 0.030))
-    top_mg  = max(40, int(target_h * 0.035))
-    bot_mg  = max(60, int(target_h * 0.050))
-    # Side margins: 7% of width each side — keeps text well inside the safe area
-    side_mg = max(50, int(target_w * 0.07))
+    top_mg  = max(40,  int(target_h * 0.035))
+    bot_mg  = max(60,  int(target_h * 0.050))
+    # 20 % each side → text lives in the centre 60 % of the frame
+    side_mg = max(50,  int(target_w * 0.20))
 
-    pri, out_c, outline_w, back, bstyle = STYLE_DEFS.get(
-        cap_style, STYLE_DEFS["Bold Yellow"]
-    )
-    shadow = 1 if bstyle == 1 else 0
+    # Outline always thick black regardless of chosen caption style
+    out_c     = "&H00000000"
+    outline_w = 5
+    bstyle    = 1   # outline + shadow mode
+    shadow    = 1
 
     # WrapStyle 1 = end-of-line wrap, respects margins — most reliable with libass
     header = (
@@ -162,42 +177,47 @@ def make_ass(captions, hook, clip_duration, target_w, target_h, cap_style,
         f"OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
         f"ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         f"Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        # Alignment 8 = top-centre; side margins to keep within safe area
-        f"Style: HookTop,Noto Sans CJK JP,{hook_fs},&H00FFFFFF,&H000000FF,&H00000000,"
-        f"&H00000000,1,0,0,0,100,100,1,0,1,4,1,8,{side_mg},{side_mg},{top_mg},1\n"
-        # Alignment 2 = bottom-centre; side margins prevent horizontal overflow
-        f"Style: Caption,Noto Sans CJK JP,{cap_fs},{pri},&H000000FF,{out_c},{back},"
-        f"1,0,0,0,100,100,0,0,{bstyle},{outline_w},{shadow},2,{side_mg},{side_mg},{bot_mg},1\n\n"
+        # Alignment 8 = top-centre
+        f"Style: HookTop,Noto Sans CJK JP,{hook_fs},&H00FFFFFF,&H000000FF,{out_c},"
+        f"&H00000000,1,0,0,0,100,100,1,0,{bstyle},{outline_w},{shadow},8,{side_mg},{side_mg},{top_mg},1\n"
+        # Alignment 2 = bottom-centre
+        f"Style: Caption,Noto Sans CJK JP,{cap_fs},&H00FFFFFF,&H000000FF,{out_c},"
+        f"&H00000000,1,0,0,0,100,100,0,0,{bstyle},{outline_w},{shadow},2,{side_mg},{side_mg},{bot_mg},1\n\n"
         f"[Events]\n"
         f"Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
 
-    events = []
-    # {\an8} = explicit top-centre alignment override (belt-and-suspenders)
+    events       = []
+    color_counter = 0   # global word counter so colours cycle across whole clip
+
+    # Hook / title — colorised, top-centre
     if hook and show_hook:
-        hook_end = clip_duration if hook_full_duration else min(3.5, clip_duration * 0.20)
+        hook_end  = clip_duration if hook_full_duration else min(3.5, clip_duration * 0.20)
         safe_hook = hook.replace("\n", " ").replace(",", "，")
+        colored   = colorize_words(safe_hook, color_counter)
+        color_counter += len(safe_hook.split())
         events.append(
-            f"Dialogue: 0,{ass_ts(0)},{ass_ts(hook_end)},HookTop,,0,0,0,,{{\\an8}}{safe_hook}"
+            f"Dialogue: 0,{ass_ts(0)},{ass_ts(hook_end)},HookTop,,0,0,0,,{{\\an8}}{colored}"
         )
 
+    # Caption chunks — colorised, bottom-centre, 2 words each
     for cap in captions:
         s    = max(0.0, float(cap.get("start", 0)))
-        e    = min(float(cap.get("end",   s + 4)), clip_duration)
+        e    = min(float(cap.get("end", s + 4)), clip_duration)
         text = str(cap.get("text", "")).strip()
         if not text or e <= s:
             continue
         words  = text.split()
-        # 2-word chunks — shorter text → no horizontal overflow
         chunks = [" ".join(words[i:i+2]) for i in range(0, len(words), 2)]
         dur    = (e - s) / max(1, len(chunks))
         for i, chunk in enumerate(chunks):
-            cs = s + i * dur
-            ce = s + (i + 1) * dur
+            cs      = s + i * dur
+            ce      = s + (i + 1) * dur
             display = chunk.upper() if cap_style in ("Bold Yellow", "Fire") else chunk
-            # {\an2} = explicit bottom-centre alignment override
+            colored  = colorize_words(display.replace(",", "，"), color_counter)
+            color_counter += len(display.split())
             events.append(
-                f"Dialogue: 0,{ass_ts(cs)},{ass_ts(ce)},Caption,,0,0,0,,{{\\an2}}{display.replace(',','，')}"
+                f"Dialogue: 0,{ass_ts(cs)},{ass_ts(ce)},Caption,,0,0,0,,{{\\an2}}{colored}"
             )
 
     return header + "\n".join(events)
