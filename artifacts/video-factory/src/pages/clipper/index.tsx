@@ -41,7 +41,12 @@ const CAPTION_STYLES = [
   { val: "Fire",          dot: "bg-orange-500" },
 ];
 const HOOK_TYPES     = ["Any","Curiosity","Shock","Story","Emotional","Educational","Inspirational","Controversial"];
-const MIN_DURATIONS  = [{ val:"20", label:"20s"},{val:"30",label:"30s"},{val:"45",label:"45s"},{val:"60",label:"60s"}];
+const DURATION_PRESETS: { min: string; max: string; label: string }[] = [
+  { min: "15", max: "30",  label: "15–30s" },
+  { min: "30", max: "60",  label: "30–60s" },
+  { min: "30", max: "90",  label: "30–90s" },
+  { min: "60", max: "120", label: "1–2min" },
+];
 const HOOK_COLORS: Record<string, string> = {
   Curiosity:"bg-blue-50 text-blue-700 border-blue-200", Shock:"bg-red-50 text-red-700 border-red-200",
   Story:"bg-purple-50 text-purple-700 border-purple-200", Emotional:"bg-pink-50 text-pink-700 border-pink-200",
@@ -69,7 +74,8 @@ export default function ClipperPage() {
   const [aspectRatio,  setAspect]      = useState("9:16");
   const [captionStyle, setCaption]     = useState("Bold Yellow");
   const [hookFilter,   setHookFilter]  = useState("Any");
-  const [minDuration,  setMinDur]      = useState("30");
+  const [durPreset,    setDurPreset]   = useState(1); // index into DURATION_PRESETS
+  const [previewClip,  setPreviewClip] = useState<number | null>(null);
 
   const [jobId,        setJobId]       = useState<string | null>(null);
   const [job,          setJob]         = useState<JobStatus | null>(null);
@@ -125,10 +131,11 @@ export default function ClipperPage() {
   }, [handleFile]);
 
   const startPipeline = async () => {
-    setError(null); setJob(null); setJobId(null); setExpanded(null);
+    setError(null); setJob(null); setJobId(null); setExpanded(null); setPreviewClip(null);
     setStarting(true);
     try {
-      const opts = { numClips, aspectRatio, captionStyle, hookFilter: hookFilter === "Any" ? null : hookFilter, minDuration: parseInt(minDuration) };
+      const dp = DURATION_PRESETS[durPreset] ?? DURATION_PRESETS[1];
+      const opts = { numClips, aspectRatio, captionStyle, hookFilter: hookFilter === "Any" ? null : hookFilter, minDuration: parseInt(dp.min), maxDuration: parseInt(dp.max) };
       let endpoint: string;
       let body: object;
       if (tab === "upload") {
@@ -158,7 +165,7 @@ export default function ClipperPage() {
     } finally { setSavingCookies(false); }
   };
 
-  const reset = () => { setJobId(null); setJob(null); setError(null); setExpanded(null); setUploadedFile(null); };
+  const reset = () => { setJobId(null); setJob(null); setError(null); setExpanded(null); setUploadedFile(null); setPreviewClip(null); };
   const copyText = (text: string, key: string) => { navigator.clipboard.writeText(text).catch(() => {}); setCopied(key); setTimeout(() => setCopied(null), 1500); };
 
   const isRunning = job && !["done", "error"].includes(job.status);
@@ -305,14 +312,14 @@ export default function ClipperPage() {
                   ))}
                 </div>
               </div>
-              {/* Min duration */}
+              {/* Duration range */}
               <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-1.5"><Clock className="w-3 h-3" /> Min Duration</p>
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-1.5"><Clock className="w-3 h-3" /> Clip Duration</p>
                 <div className="flex gap-2">
-                  {MIN_DURATIONS.map(d => (
-                    <button key={d.val} onClick={() => setMinDur(d.val)}
+                  {DURATION_PRESETS.map((d, i) => (
+                    <button key={d.label} onClick={() => setDurPreset(i)}
                       className={cn("flex-1 py-2 rounded-lg text-sm font-bold transition-all border",
-                        minDuration === d.val ? "bg-amber-400 text-amber-950 border-amber-400" : "bg-gray-50 text-gray-500 border-gray-100 hover:border-amber-200 hover:text-amber-700"
+                        durPreset === i ? "bg-amber-400 text-amber-950 border-amber-400" : "bg-gray-50 text-gray-500 border-gray-100 hover:border-amber-200 hover:text-amber-700"
                       )}>{d.label}</button>
                   ))}
                 </div>
@@ -515,6 +522,18 @@ export default function ClipperPage() {
                   </div>
                   {expanded === clip.id && (
                     <div className="border-t border-gray-100 px-4 pb-4 pt-3 space-y-3">
+                      {/* Inline video preview */}
+                      {clip.status === "done" && clip.downloadToken && (
+                        <div className="rounded-xl overflow-hidden bg-black">
+                          <video
+                            key={clip.downloadToken}
+                            src={`/api/clipper/preview/${clip.downloadToken}`}
+                            controls
+                            preload="metadata"
+                            className={cn("w-full max-h-[420px]", aspectRatio === "9:16" ? "max-w-[240px] mx-auto" : aspectRatio === "1:1" ? "max-w-[360px] mx-auto" : "w-full")}
+                          />
+                        </div>
+                      )}
                       {clip.hook && (
                         <div className="flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3">
                           <div className="flex-1"><p className="text-[10px] font-bold text-amber-600 uppercase tracking-wide mb-0.5">Opening Hook</p><p className="text-sm font-semibold text-gray-800">"{clip.hook}"</p></div>

@@ -34,14 +34,16 @@ function parseDuration(dur: string): number {
   return unit.startsWith("m") ? Math.round(n * 60) : Math.round(n);
 }
 
-/** Choose number of clips and per-clip duration based on total video length */
+/** Choose number of clips and per-clip duration based on total video length.
+ *  Goal: use MAXIMUM unique clips with SHORT per-clip durations (5–8 s each). */
 function getClipConfig(secs: number): { numClips: number; clipDur: number } {
-  if (secs <= 15)  return { numClips: 2, clipDur: secs / 2 };
-  if (secs <= 40)  return { numClips: 3, clipDur: secs / 3 };
-  if (secs <= 90)  return { numClips: 4, clipDur: secs / 4 };
-  if (secs <= 180) return { numClips: 5, clipDur: secs / 5 };
-  if (secs <= 300) return { numClips: 6, clipDur: secs / 6 };
-  return { numClips: 8, clipDur: secs / 8 };
+  if (secs <= 20)  return { numClips: 4,  clipDur: secs / 4  };  // ~5s each
+  if (secs <= 40)  return { numClips: 6,  clipDur: secs / 6  };  // ~6s each
+  if (secs <= 70)  return { numClips: 8,  clipDur: secs / 8  };  // ~7-8s each
+  if (secs <= 120) return { numClips: 12, clipDur: secs / 12 };  // ~8-10s each
+  if (secs <= 200) return { numClips: 15, clipDur: secs / 15 };  // ~10-13s each
+  if (secs <= 300) return { numClips: 20, clipDur: secs / 20 };  // ~12-15s each
+  return { numClips: 25, clipDur: secs / 25 };
 }
 
 
@@ -402,14 +404,14 @@ async function buildFfmpegArgs(
 
   if (showTitle) {
     const titleFile = path.join(dir, "title.txt");
-    await fs.promises.writeFile(titleFile, wrapText(title, 42, 1), "utf8");
+    await fs.promises.writeFile(titleFile, wrapText(title, 36, 2), "utf8");
     parts.push(
       `[${prev}]drawtext=fontfile=${FONT}:textfile=${titleFile}:` +
-      `fontsize=44:fontcolor=white:` +
-      `x='max(60,(w-text_w)/2)':y=h*0.81:` +
-      `shadowcolor=black:shadowx=2:shadowy=2:` +
-      `box=1:boxcolor=black@0.55:boxborderw=12:` +
-      `enable='between(t\\,0\\,3.5)'[v_title]`
+      `fontsize=26:fontcolor=white:` +
+      `x='(w-text_w)/2':y=32:` +
+      `shadowcolor=black@0.8:shadowx=2:shadowy=2:` +
+      `box=1:boxcolor=black@0.50:boxborderw=10:` +
+      `enable='between(t\\,0\\,2.5)'[v_title]`
     );
     prev = "v_title";
   }
@@ -510,9 +512,9 @@ async function renderProject(
       .where(eq(projectsTable.id, id));
 
   try {
-    // Download video clips with stream_loop support
+    // Download ALL passed assets (caller already sliced to the right count)
     const clipPaths: string[] = [];
-    const numClips = Math.min(assets.length, 8);
+    const numClips = assets.length;
     for (let i = 0; i < numClips; i++) {
       const dest = path.join(dir, `clip${i}.mp4`);
       await downloadFile(assets[i].url, dest);
