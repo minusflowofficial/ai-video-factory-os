@@ -7,15 +7,16 @@ Features:
   - Multi-face-cluster detection: if faces appear in 2 distinct horizontal
     zones (left/right for 9:16 source), generates TWO separate crop outputs
     each following one cluster
-  - ASS captions: hook title at TOP, 3-word bubbles at BOTTOM
+  - ASS captions: hook title at TOP, 2-word bubbles at BOTTOM
   - Sizes are pixel-accurate (PlayResX/Y = actual video resolution)
   - Optional SFX: synthetic chime mixed in at clip start
   - show_hook flag: skip burning the hook title overlay when False
+  - hook_full_duration: when True, hook title shows for the entire clip
 """
 
 import sys, json, subprocess, os, pathlib
 
-# Directory containing bundled fonts (NotoSansCJKjp-Regular.otf for CJK support)
+# Directory containing bundled fonts (NotoSansJP-Regular.otf for CJK support)
 FONTS_DIR = str(pathlib.Path(__file__).parent / "fonts")
 
 try:
@@ -120,36 +121,53 @@ def clamp_crop(cx_desired, cy_desired, src_w, src_h, crop_w, crop_h):
     return x, y
 
 
+# ── Get actual rendered video duration via ffprobe ────────────────────────────
+
+def get_actual_duration(path: str) -> float:
+    try:
+        r = subprocess.run([
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", path,
+        ], capture_output=True, text=True)
+        return round(float(r.stdout.strip()), 1)
+    except Exception:
+        return 0.0
+
+
 # ── ASS subtitle builder ───────────────────────────────────────────────────────
 
-def make_ass(captions, hook, clip_duration, target_w, target_h, cap_style, show_hook=True):
+def make_ass(captions, hook, clip_duration, target_w, target_h, cap_style,
+             show_hook=True, hook_full_duration=False):
     ref     = min(target_w, target_h)
-    hook_fs = max(44, int(ref * 0.068))
-    cap_fs  = max(36, int(ref * 0.052))
+    # Smaller font sizes to prevent overflow — hook slightly larger than captions
+    hook_fs = max(32, int(ref * 0.046))
+    cap_fs  = max(24, int(ref * 0.030))
     top_mg  = max(40, int(target_h * 0.035))
-    bot_mg  = max(80, int(target_h * 0.060))
+    bot_mg  = max(60, int(target_h * 0.050))
+    # Side margins: 7% of width each side — keeps text well inside the safe area
+    side_mg = max(50, int(target_w * 0.07))
 
     pri, out_c, outline_w, back, bstyle = STYLE_DEFS.get(
         cap_style, STYLE_DEFS["Bold Yellow"]
     )
     shadow = 1 if bstyle == 1 else 0
 
-    # WrapStyle 0 = smart wrap (even line lengths, centred); most reliable for libass
+    # WrapStyle 1 = end-of-line wrap, respects margins — most reliable with libass
     header = (
         f"[Script Info]\nScriptType: v4.00+\n"
         f"PlayResX: {target_w}\nPlayResY: {target_h}\n"
-        f"ScaledBorderAndShadow: yes\nWrapStyle: 0\n\n"
+        f"ScaledBorderAndShadow: yes\nWrapStyle: 1\n\n"
         f"[V4+ Styles]\n"
         f"Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
         f"OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
         f"ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         f"Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        # Alignment 8 = top-centre; MarginL/R = 0 for true centre
+        # Alignment 8 = top-centre; side margins to keep within safe area
         f"Style: HookTop,Noto Sans CJK JP,{hook_fs},&H00FFFFFF,&H000000FF,&H00000000,"
-        f"&H00000000,1,0,0,0,100,100,1,0,1,5,1,8,0,0,{top_mg},1\n"
-        # Alignment 2 = bottom-centre; MarginL/R = 0 for true centre
+        f"&H00000000,1,0,0,0,100,100,1,0,1,4,1,8,{side_mg},{side_mg},{top_mg},1\n"
+        # Alignment 2 = bottom-centre; side margins prevent horizontal overflow
         f"Style: Caption,Noto Sans CJK JP,{cap_fs},{pri},&H000000FF,{out_c},{back},"
-        f"1,0,0,0,100,100,0,0,{bstyle},{outline_w},{shadow},2,0,0,{bot_mg},1\n\n"
+        f"1,0,0,0,100,100,0,0,{bstyle},{outline_w},{shadow},2,{side_mg},{side_mg},{bot_mg},1\n\n"
         f"[Events]\n"
         f"Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
@@ -157,7 +175,7 @@ def make_ass(captions, hook, clip_duration, target_w, target_h, cap_style, show_
     events = []
     # {\an8} = explicit top-centre alignment override (belt-and-suspenders)
     if hook and show_hook:
-        hook_end  = min(3.5, clip_duration * 0.20)
+        hook_end = clip_duration if hook_full_duration else min(3.5, clip_duration * 0.20)
         safe_hook = hook.replace("\n", " ").replace(",", "，")
         events.append(
             f"Dialogue: 0,{ass_ts(0)},{ass_ts(hook_end)},HookTop,,0,0,0,,{{\\an8}}{safe_hook}"
@@ -170,7 +188,8 @@ def make_ass(captions, hook, clip_duration, target_w, target_h, cap_style, show_
         if not text or e <= s:
             continue
         words  = text.split()
-        chunks = [" ".join(words[i:i+3]) for i in range(0, len(words), 3)]
+        # 2-word chunks — shorter text → no horizontal overflow
+        chunks = [" ".join(words[i:i+2]) for i in range(0, len(words), 2)]
         dur    = (e - s) / max(1, len(chunks))
         for i, chunk in enumerate(chunks):
             cs = s + i * dur
@@ -184,7 +203,7 @@ def make_ass(captions, hook, clip_duration, target_w, target_h, cap_style, show_
     return header + "\n".join(events)
 
 
-# ── ffprobe ────────────────────────────────────────────────────────────────────
+# ── ffprobe dimensions ─────────────────────────────────────────────────────────
 
 def probe_dimensions(path: str):
     r = subprocess.run([
@@ -215,8 +234,6 @@ def encode_crop(raw_clip, out_path, cx, cy, crop_w, crop_h,
     safe_fonts = FONTS_DIR.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
 
     if add_sfx:
-        # Mix a short synthetic chime (dual-freq tone, 0.6 s) at the very start
-        # alongside the original audio, then burn captions on the video stream.
         sfx_expr = (
             "sin(2*PI*880*t)*exp(-t*6)*0.40+"
             "sin(2*PI*1320*t)*exp(-t*12)*0.20"
@@ -254,16 +271,17 @@ def encode_crop(raw_clip, out_path, cx, cy, crop_w, crop_h,
 # ── Main pipeline ──────────────────────────────────────────────────────────────
 
 def run(data: dict):
-    input_video   = data["input_video"]
-    output_path   = data["output_path"]
-    start_time    = data["start_time"]
-    end_time      = data["end_time"]
-    aspect_ratio  = data.get("aspect_ratio",  "9:16")
-    caption_style = data.get("caption_style", "Bold Yellow")
-    hook          = data.get("hook",          "")
-    captions      = data.get("captions",      [])
-    show_hook     = data.get("show_hook",     True)
-    add_sfx       = data.get("add_sfx",       False)
+    input_video        = data["input_video"]
+    output_path        = data["output_path"]
+    start_time         = data["start_time"]
+    end_time           = data["end_time"]
+    aspect_ratio       = data.get("aspect_ratio",       "9:16")
+    caption_style      = data.get("caption_style",      "Bold Yellow")
+    hook               = data.get("hook",               "")
+    captions           = data.get("captions",           [])
+    show_hook          = data.get("show_hook",          True)
+    hook_full_duration = data.get("hook_full_duration", False)
+    add_sfx            = data.get("add_sfx",            False)
 
     start_sec     = time_to_seconds(start_time)
     end_sec       = time_to_seconds(end_time)
@@ -315,7 +333,9 @@ def run(data: dict):
     ass_path = os.path.join(tmp_dir, "captions.ass")
     with open(ass_path, "w", encoding="utf-8") as f:
         f.write(make_ass(captions, hook, clip_duration,
-                         target_w, target_h, caption_style, show_hook=show_hook))
+                         target_w, target_h, caption_style,
+                         show_hook=show_hook,
+                         hook_full_duration=hook_full_duration))
 
     outputs = []
 
@@ -330,9 +350,13 @@ def run(data: dict):
             out = f"{base}_{label}.mp4"
             encode_crop(raw_clip, out, cx, cy, crop_w, crop_h,
                         target_w, target_h, ass_path, tmp_dir, add_sfx=add_sfx)
-            size_mb = round(os.path.getsize(out) / 1024 / 1024, 2)
-            outputs.append({"output": out, "size_mb": size_mb,
-                            "face_zone": "left" if label == "A" else "right"})
+            actual_dur = get_actual_duration(out)
+            size_mb    = round(os.path.getsize(out) / 1024 / 1024, 2)
+            outputs.append({
+                "output": out, "size_mb": size_mb,
+                "face_zone": "left" if label == "A" else "right",
+                "duration_sec": actual_dur,
+            })
     else:
         if centres:
             all_avg = avg_point(centres)
@@ -341,16 +365,21 @@ def run(data: dict):
                 face_cy = max(face_cy, int(crop_h * 0.30))
             cx, cy = clamp_crop(face_cx, face_cy, src_w, src_h, crop_w, crop_h)
         else:
+            # No face detected — use true centre crop so subject stays in frame
             cx = (src_w - crop_w) // 2
-            cy = max(0, int(src_h * 0.10))
+            cy = (src_h - crop_h) // 2
             cx = max(0, min(cx, src_w - crop_w))
             cy = max(0, min(cy, src_h - crop_h))
 
         encode_crop(raw_clip, output_path, cx, cy, crop_w, crop_h,
                     target_w, target_h, ass_path, tmp_dir, add_sfx=add_sfx)
-        size_mb = round(os.path.getsize(output_path) / 1024 / 1024, 2)
-        outputs.append({"output": output_path, "size_mb": size_mb,
-                        "face_zone": "full"})
+        actual_dur = get_actual_duration(output_path)
+        size_mb    = round(os.path.getsize(output_path) / 1024 / 1024, 2)
+        outputs.append({
+            "output": output_path, "size_mb": size_mb,
+            "face_zone": "full",
+            "duration_sec": actual_dur,
+        })
 
     # Cleanup
     for f in [raw_clip, ass_path]:
@@ -362,7 +391,7 @@ def run(data: dict):
     print(json.dumps({
         "ok":           True,
         "outputs":      outputs,
-        "duration_sec": round(clip_duration, 1),
+        "duration_sec": outputs[0]["duration_sec"],
         "output":       outputs[0]["output"],
         "size_mb":      outputs[0]["size_mb"],
     }))

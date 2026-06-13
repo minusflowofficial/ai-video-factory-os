@@ -81,7 +81,8 @@ export default function ClipperPage() {
   const [aspectRatio,  setAspect]      = useState("9:16");
   const [captionStyle, setCaption]     = useState("Bold Yellow");
   const [hookFilter,   setHookFilter]  = useState("Any");
-  const [showHook,     setShowHook]    = useState(true);
+  const [showHook,        setShowHook]        = useState(true);
+  const [hookFullDuration, setHookFullDuration] = useState(false);
   const [durPreset,    setDurPreset]   = useState(1); // index into DURATION_PRESETS
   const [previewClip,  setPreviewClip] = useState<number | null>(null);
 
@@ -181,7 +182,7 @@ export default function ClipperPage() {
     setStarting(true);
     try {
       const dp = DURATION_PRESETS[durPreset] ?? DURATION_PRESETS[1];
-      const opts = { numClips, aspectRatio, captionStyle, hookFilter: hookFilter === "Any" ? null : hookFilter, minDuration: parseInt(dp.min), maxDuration: parseInt(dp.max), showHook };
+      const opts = { numClips, aspectRatio, captionStyle, hookFilter: hookFilter === "Any" ? null : hookFilter, minDuration: parseInt(dp.min), maxDuration: parseInt(dp.max), showHook, hookFullDuration };
       let endpoint: string;
       let body: object;
       if (tab === "upload") {
@@ -502,6 +503,40 @@ export default function ClipperPage() {
                     )} />
                   </button>
                 </div>
+
+                {/* Title duration selector — only when showHook is on */}
+                {showHook && (
+                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-50">
+                    <div>
+                      <p className="text-xs font-semibold text-gray-700">Title Duration</p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">How long the hook title stays on screen</p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setHookFullDuration(false)}
+                        className={cn(
+                          "px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors",
+                          !hookFullDuration
+                            ? "bg-amber-400 border-amber-400 text-amber-950"
+                            : "bg-gray-50 border-gray-100 text-gray-500 hover:border-amber-200",
+                        )}
+                      >
+                        Start only
+                      </button>
+                      <button
+                        onClick={() => setHookFullDuration(true)}
+                        className={cn(
+                          "px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors",
+                          hookFullDuration
+                            ? "bg-amber-400 border-amber-400 text-amber-950"
+                            : "bg-gray-50 border-gray-100 text-gray-500 hover:border-amber-200",
+                        )}
+                      >
+                        Full clip
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

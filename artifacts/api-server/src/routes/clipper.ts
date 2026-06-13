@@ -323,8 +323,8 @@ Return ONLY a JSON array (no other text):
 // ── Create a single clip (returns 1 or 2 outputs when face-split occurs) ──────
 async function createClip(
   clip: any, videoPath: string, segments: any[], aspectRatio: string,
-  captionStyle: string, outDir: string, showHook = true,
-): Promise<Array<{ downloadToken: string; sizeMb: number; faceZone?: string }>> {
+  captionStyle: string, outDir: string, showHook = true, hookFullDuration = false,
+): Promise<Array<{ downloadToken: string; sizeMb: number; faceZone?: string; durationSec?: number }>> {
   const startSec = timeStrToSeconds(clip.startTime);
   const endSec   = timeStrToSeconds(clip.endTime);
 
@@ -352,7 +352,8 @@ async function createClip(
     caption_style: captionStyle,
     hook:          clip.hook ?? clip.topic ?? "",
     captions:      clipCaptions,
-    show_hook:     showHook,
+    show_hook:          showHook,
+    hook_full_duration: hookFullDuration,
   });
 
   const { stdout } = await execFileAsync(PYTHON, [CREATE_CLIP_SCRIPT, input], { timeout: 600_000 });
@@ -367,7 +368,7 @@ async function createClip(
   return pyOutputs.map(o => {
     const token = crypto.randomUUID();
     downloadTokens.set(token, { filePath: o.output, expiresAt: TTL });
-    return { downloadToken: token, sizeMb: o.size_mb, faceZone: o.face_zone };
+    return { downloadToken: token, sizeMb: o.size_mb, faceZone: o.face_zone, durationSec: (o as any).duration_sec };
   });
 }
 
@@ -375,9 +376,9 @@ async function createClip(
 async function runPipeline(job: ClipJob, opts: {
   videoId?: string; localVideoPath?: string; numClips: number; aspectRatio: string;
   captionStyle: string; hookFilter: string | null; minDuration: number; maxDuration: number;
-  showHook?: boolean;
+  showHook?: boolean; hookFullDuration?: boolean;
 }) {
-  const { videoId, localVideoPath, numClips, aspectRatio, captionStyle, hookFilter, minDuration, maxDuration, showHook = true } = opts;
+  const { videoId, localVideoPath, numClips, aspectRatio, captionStyle, hookFilter, minDuration, maxDuration, showHook = true, hookFullDuration = false } = opts;
   try {
     // 1. Get video path
     let videoPath: string;
@@ -436,13 +437,17 @@ async function runPipeline(job: ClipJob, opts: {
         jobClip.status = "processing";
         try {
           const results = await createClip(
-            aiClip, videoPath, segments, aspectRatio, captionStyle, job.dir, showHook,
+            aiClip, videoPath, segments, aspectRatio, captionStyle, job.dir, showHook, hookFullDuration,
           );
 
           // Primary output (always index 0)
           jobClip.status        = "done";
           jobClip.downloadToken = results[0].downloadToken;
           jobClip.sizeMb        = results[0].sizeMb;
+          // Use actual rendered duration from ffprobe (overrides AI estimate)
+          if (results[0].durationSec != null && results[0].durationSec > 0) {
+            jobClip.duration = `${Math.round(results[0].durationSec)}s`;
+          }
           job.doneClips++;
 
           // If face-split produced a second crop, inject a bonus clip entry
@@ -567,7 +572,7 @@ router.post("/clipper/upload", (req, res, next) => {
 
 // POST /api/clipper/process — YouTube URL pipeline
 router.post("/clipper/process", async (req, res): Promise<void> => {
-  const { url, numClips = 5, aspectRatio = "9:16", captionStyle = "Bold Yellow", hookFilter = null, minDuration = 30, maxDuration = 90, showHook = true } = req.body ?? {};
+  const { url, numClips = 5, aspectRatio = "9:16", captionStyle = "Bold Yellow", hookFilter = null, minDuration = 30, maxDuration = 90, showHook = true, hookFullDuration = false } = req.body ?? {};
   if (!url) { res.status(400).json({ error: "url required" }); return; }
   const videoId = extractYouTubeId(String(url));
   if (!videoId) { res.status(400).json({ error: "Invalid YouTube URL" }); return; }
@@ -581,13 +586,13 @@ router.post("/clipper/process", async (req, res): Promise<void> => {
     sourceType: "youtube", sourceUrl: String(url), aspectRatio, captionStyle,
   };
   jobs.set(jobId, job);
-  runPipeline(job, { videoId, numClips, aspectRatio, captionStyle, hookFilter, minDuration, maxDuration, showHook: Boolean(showHook) }).catch(() => {});
+  runPipeline(job, { videoId, numClips, aspectRatio, captionStyle, hookFilter, minDuration, maxDuration, showHook: Boolean(showHook), hookFullDuration: Boolean(hookFullDuration) }).catch(() => {});
   res.json({ jobId });
 });
 
 // POST /api/clipper/process-local — uploaded file pipeline
 router.post("/clipper/process-local", async (req, res): Promise<void> => {
-  const { filePath, videoTitle, filename, numClips = 5, aspectRatio = "9:16", captionStyle = "Bold Yellow", hookFilter = null, minDuration = 30, maxDuration = 90, showHook = true } = req.body ?? {};
+  const { filePath, videoTitle, filename, numClips = 5, aspectRatio = "9:16", captionStyle = "Bold Yellow", hookFilter = null, minDuration = 30, maxDuration = 90, showHook = true, hookFullDuration = false } = req.body ?? {};
   if (!filePath) { res.status(400).json({ error: "filePath required" }); return; }
   if (!fs.existsSync(filePath)) { res.status(400).json({ error: "File not found" }); return; }
 
@@ -602,7 +607,7 @@ router.post("/clipper/process-local", async (req, res): Promise<void> => {
     aspectRatio, captionStyle,
   };
   jobs.set(jobId, job);
-  runPipeline(job, { localVideoPath: filePath, numClips, aspectRatio, captionStyle, hookFilter, minDuration, maxDuration, showHook: Boolean(showHook) }).catch(() => {});
+  runPipeline(job, { localVideoPath: filePath, numClips, aspectRatio, captionStyle, hookFilter, minDuration, maxDuration, showHook: Boolean(showHook), hookFullDuration: Boolean(hookFullDuration) }).catch(() => {});
   res.json({ jobId });
 });
 
