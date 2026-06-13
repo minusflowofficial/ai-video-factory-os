@@ -1,34 +1,36 @@
 #!/usr/bin/env python3
 """
 create_quote_video.py
+Creates a stylish quote video: background footage + music + modern typography card overlay.
 Usage: python3 create_quote_video.py <quote_text> <bg_video_url> <music_url> <output_path> [aspect_ratio] [language]
-Creates a stylish quote video with background footage, music, and centered text.
-Supports all languages (CJK, Arabic, Latin) via Noto Sans CJK JP font.
 """
 import sys
 import os
 import subprocess
 import tempfile
-import textwrap
 import shutil
 import urllib.request
+from PIL import Image, ImageDraw, ImageFont
 
-SCRIPT_DIR     = os.path.dirname(os.path.abspath(__file__))
-FONT_PATH_CJK  = os.path.join(SCRIPT_DIR, "fonts", "NotoSansJP-Regular.otf")
-FONT_PATH_LATIN = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+SCRIPT_DIR      = os.path.dirname(os.path.abspath(__file__))
+FONT_PATH       = os.path.join(SCRIPT_DIR, "fonts", "NotoSansJP-Regular.otf")
+FONT_FALLBACK   = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 
-def pick_font(language: str) -> str:
-    """Use Noto CJK for all languages if available (covers CJK, Arabic, Latin)."""
-    if os.path.exists(FONT_PATH_CJK):
-        return FONT_PATH_CJK
-    return FONT_PATH_LATIN
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+def get_font(size: int) -> ImageFont.FreeTypeFont:
+    path = FONT_PATH if os.path.exists(FONT_PATH) else FONT_FALLBACK
+    try:
+        return ImageFont.truetype(path, size)
+    except Exception:
+        return ImageFont.load_default()
 
 
 def dl(url: str, dest: str, timeout: int = 60):
     req = urllib.request.Request(url, headers={
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": "https://mixkit.co/",
+        "Referer":    "https://mixkit.co/",
     })
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         with open(dest, "wb") as f:
@@ -39,15 +41,150 @@ def dl(url: str, dest: str, timeout: int = 60):
                 f.write(chunk)
 
 
-def esc_drawtext(text: str) -> str:
-    return (text
-        .replace("\\", "\\\\")
-        .replace("'",  "\\'")
-        .replace(":",  "\\:")
-        .replace("[",  "\\[")
-        .replace("]",  "\\]")
-        .replace("%",  "\\%"))
+def wrap_lines(text: str, font: ImageFont.FreeTypeFont,
+               max_width: int, draw: ImageDraw.ImageDraw) -> list[str]:
+    """Word-wrap text to fit max_width pixels."""
+    words  = text.split()
+    lines: list[str] = []
+    current: list[str] = []
+    for word in words:
+        test = " ".join(current + [word])
+        bbox = draw.textbbox((0, 0), test, font=font)
+        if bbox[2] - bbox[0] <= max_width:
+            current.append(word)
+        else:
+            if current:
+                lines.append(" ".join(current))
+            current = [word]
+    if current:
+        lines.append(" ".join(current))
+    return lines or [text]
 
+
+# ── Card Overlay ───────────────────────────────────────────────────────────────
+
+# Color palette — dark card + gold accents + white text
+CARD_BG      = (8,  12,  24, 210)   # near-black, 82 % opaque
+GOLD         = (255, 193,  7, 255)  # amber / gold
+GOLD_DIM     = (255, 193,  7, 180)
+WHITE        = (255, 255, 255, 250)
+SHADOW       = (0,   0,   0,  160)
+ACCENT_LINE  = (255, 193,  7, 220)
+
+
+def draw_rounded_rect(draw: ImageDraw.ImageDraw, xy: tuple,
+                      radius: int, fill: tuple):
+    x0, y0, x1, y1 = xy
+    draw.rectangle([x0 + radius, y0, x1 - radius, y1], fill=fill)
+    draw.rectangle([x0, y0 + radius, x1, y1 - radius], fill=fill)
+    draw.ellipse([x0, y0, x0 + 2*radius, y0 + 2*radius], fill=fill)
+    draw.ellipse([x1 - 2*radius, y0, x1, y0 + 2*radius], fill=fill)
+    draw.ellipse([x0, y1 - 2*radius, x0 + 2*radius, y1], fill=fill)
+    draw.ellipse([x1 - 2*radius, y1 - 2*radius, x1, y1], fill=fill)
+
+
+def create_overlay(quote: str, author: str, w: int, h: int) -> Image.Image:
+    """
+    Returns a transparent RGBA image (w×h) with a centered quote card.
+    Design: rounded dark card · big gold " " · white body text · gold divider · amber author line
+    """
+    img  = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    # ── Font sizes ─────────────────────────────────────────────────────────────
+    ref          = min(w, h)
+    qmark_size   = max(100, int(ref * 0.10))   # decorative " "
+    body_size    = max(40,  int(ref * 0.048))  # quote body
+    author_size  = max(28,  int(ref * 0.030))  # author / attribution
+
+    font_qmark  = get_font(qmark_size)
+    font_body   = get_font(body_size)
+    font_author = get_font(author_size)
+
+    # ── Safe margins & card width ──────────────────────────────────────────────
+    side_mg  = int(w * 0.08)                   # 8 % each side
+    card_w   = w - 2 * side_mg
+    inner_mg = int(w * 0.055)                  # inner horizontal padding
+    text_w   = card_w - 2 * inner_mg
+
+    # ── Wrap text ──────────────────────────────────────────────────────────────
+    lines     = wrap_lines(quote, font_body, text_w, draw)
+    line_gap  = int(body_size * 0.40)
+    line_step = body_size + line_gap
+
+    # ── Measure total card height ──────────────────────────────────────────────
+    qmark_h      = qmark_size + int(qmark_size * 0.10)
+    body_h       = len(lines) * line_step
+    divider_h    = int(ref * 0.025)
+    author_h     = (author_size + int(author_size * 0.4)) if author else 0
+    pad_v        = int(h * 0.045)
+
+    card_h  = pad_v + qmark_h + body_h + divider_h + author_h + pad_v
+    card_x  = side_mg
+    card_y  = (h - card_h) // 2
+
+    # ── Draw card background (rounded rect on separate layer, then paste) ──────
+    card_layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    cd         = ImageDraw.Draw(card_layer)
+    radius     = int(ref * 0.022)
+    draw_rounded_rect(cd,
+                      (card_x, card_y, card_x + card_w, card_y + card_h),
+                      radius, CARD_BG)
+
+    # Gold top + bottom border strips
+    strip_h = max(5, int(ref * 0.005))
+    cd.rectangle([(card_x + radius, card_y),
+                  (card_x + card_w - radius, card_y + strip_h)],
+                 fill=GOLD)
+    cd.rectangle([(card_x + radius, card_y + card_h - strip_h),
+                  (card_x + card_w - radius, card_y + card_h)],
+                 fill=GOLD)
+
+    img = Image.alpha_composite(img, card_layer)
+    draw = ImageDraw.Draw(img)
+
+    # ── Decorative opening quote mark ──────────────────────────────────────────
+    qmark   = "\u201c"
+    qm_bbox = draw.textbbox((0, 0), qmark, font=font_qmark)
+    qm_w    = qm_bbox[2] - qm_bbox[0]
+    qm_x    = card_x + (card_w - qm_w) // 2
+    qm_y    = card_y + pad_v - int(qmark_size * 0.05)
+    draw.text((qm_x, qm_y), qmark, font=font_qmark, fill=GOLD_DIM)
+
+    # ── Quote body lines ────────────────────────────────────────────────────────
+    ty = card_y + pad_v + qmark_h - int(body_size * 0.30)
+    for line in lines:
+        lb   = draw.textbbox((0, 0), line, font=font_body)
+        lw   = lb[2] - lb[0]
+        tx   = card_x + (card_w - lw) // 2
+        # shadow
+        draw.text((tx + 2, ty + 2), line, font=font_body, fill=SHADOW)
+        # main text
+        draw.text((tx,     ty    ), line, font=font_body, fill=WHITE)
+        ty += line_step
+
+    # ── Gold divider line ───────────────────────────────────────────────────────
+    ty        += int(line_gap * 0.8)
+    div_len    = int(card_w * 0.38)
+    div_x      = card_x + (card_w - div_len) // 2
+    div_thick  = max(2, int(ref * 0.003))
+    draw.rectangle([(div_x, ty), (div_x + div_len, ty + div_thick)],
+                   fill=ACCENT_LINE)
+    ty += div_thick + int(ref * 0.015)
+
+    # ── Author / attribution ────────────────────────────────────────────────────
+    if author:
+        atext = f"\u2014 {author}"
+        ab    = draw.textbbox((0, 0), atext, font=font_author)
+        aw    = ab[2] - ab[0]
+        ax    = card_x + (card_w - aw) // 2
+        draw.text((ax + 1, ty + 1), atext, font=font_author, fill=SHADOW)
+        draw.text((ax,     ty    ), atext, font=font_author, fill=GOLD)
+
+    return img
+
+
+# ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
     if len(sys.argv) < 5:
@@ -60,7 +197,7 @@ def main():
     music_url = sys.argv[3]
     output    = sys.argv[4]
     aspect    = sys.argv[5] if len(sys.argv) > 5 else "9:16"
-    language  = sys.argv[6] if len(sys.argv) > 6 else "English"
+    # language  = sys.argv[6] if len(sys.argv) > 6 else "English"  # reserved
 
     if aspect == "9:16":
         w, h = 1080, 1920
@@ -69,80 +206,57 @@ def main():
     else:
         w, h = 1920, 1080
 
-    duration  = 30
-    font_path = pick_font(language)
-    font_size = max(48, int(min(w, h) * 0.060))
+    duration = 30
 
-    # Narrower wrap for portrait, wider for landscape
-    chars_per_line = 24 if w < h else 42
+    # Split "Quote text - Author Name" if present
+    author = ""
+    if " - " in quote:
+        parts  = quote.rsplit(" - ", 1)
+        quote  = parts[0].strip()
+        author = parts[1].strip()
 
-    tmp_dir   = tempfile.mkdtemp(prefix="qvid_")
-    tmp_video = os.path.join(tmp_dir, "bg.mp4")
-    tmp_music = os.path.join(tmp_dir, "music.mp3")
+    tmp_dir     = tempfile.mkdtemp(prefix="qvid_")
+    tmp_video   = os.path.join(tmp_dir, "bg.mp4")
+    tmp_music   = os.path.join(tmp_dir, "music.mp3")
+    tmp_overlay = os.path.join(tmp_dir, "overlay.png")
 
     try:
-        # Download assets
-        print(f"Downloading bg video from {bg_url[:60]}...", file=sys.stderr)
+        print("Downloading bg video…", file=sys.stderr)
         dl(bg_url,    tmp_video)
-        print(f"Downloading music from {music_url[:60]}...", file=sys.stderr)
+        print("Downloading music…",   file=sys.stderr)
         dl(music_url, tmp_music)
 
-        # Wrap text — FFmpeg drawtext uses \n for newlines
-        lines   = textwrap.wrap(quote, chars_per_line)
-        wrapped = "\\n".join(lines)
-        esc     = esc_drawtext(wrapped)
+        print("Creating quote card overlay…", file=sys.stderr)
+        overlay = create_overlay(quote, author, w, h)
+        overlay.save(tmp_overlay, "PNG")
 
-        line_spacing = max(10, int(font_size * 0.28))
-
-        # Compute vertical centering offset: move text up slightly above true center
-        # for visual balance (eye reads upper half first)
-        y_offset = int(h * 0.06)
-
-        # Video filter: scale/crop → darken → quote shadow + main text
-        vf = (
-            f"scale={w}:{h}:force_original_aspect_ratio=increase,"
+        # ── FFmpeg: bg video (darkened) + PNG overlay + looped music ────────────
+        filter_complex = (
+            f"[0:v]scale={w}:{h}:force_original_aspect_ratio=increase,"
             f"crop={w}:{h},"
-            f"eq=brightness=-0.20:saturation=0.75,"
-            # Drop shadow (offset 3px right, 3px down)
-            f"drawtext="
-            f"fontfile={font_path}:"
-            f"text='{esc}':"
-            f"fontsize={font_size}:"
-            f"fontcolor=0x000000@0.85:"
-            f"x=(w-tw)/2+3:"
-            f"y=(h-th)/2-{y_offset}+3:"
-            f"line_spacing={line_spacing},"
-            # Dark semi-transparent backing box + golden main text
-            f"drawtext="
-            f"fontfile={font_path}:"
-            f"text='{esc}':"
-            f"fontsize={font_size}:"
-            f"fontcolor=0xFFD700:"
-            f"x=(w-tw)/2:"
-            f"y=(h-th)/2-{y_offset}:"
-            f"box=1:"
-            f"boxcolor=0x0d0d0d@0.75:"
-            f"boxborderw={max(20, int(font_size * 0.55))}:"
-            f"line_spacing={line_spacing}"
+            f"eq=brightness=-0.18:saturation=0.72[bg];"
+            f"[bg][1:v]overlay=0:0:format=auto,format=yuv420p[out]"
         )
 
         cmd = [
             "ffmpeg", "-y",
             "-stream_loop", "-1", "-i", tmp_video,
+            "-i", tmp_overlay,
             "-stream_loop", "-1", "-i", tmp_music,
             "-t", str(duration),
-            "-vf", vf,
-            "-c:v", "libx264", "-preset", "fast", "-crf", "24",
+            "-filter_complex", filter_complex,
+            "-map", "[out]",
+            "-map", "2:a",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "22",
             "-c:a", "aac", "-b:a", "128k",
-            "-map", "0:v", "-map", "1:a",
             "-shortest",
             output,
         ]
 
-        print(f"Running FFmpeg...", file=sys.stderr)
+        print("Running FFmpeg…", file=sys.stderr)
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
         if result.returncode != 0:
-            print(f"FFmpeg stderr: {result.stderr[-3000:]}", file=sys.stderr)
+            print(f"FFmpeg stderr:\n{result.stderr[-4000:]}", file=sys.stderr)
             sys.exit(1)
 
         size_mb = round(os.path.getsize(output) / 1024 / 1024, 2)
