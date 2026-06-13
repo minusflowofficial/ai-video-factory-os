@@ -146,11 +146,11 @@ export default function ClipperPage() {
         const start = i * CHUNK_SIZE;
         const chunk = file.slice(start, Math.min(start + CHUNK_SIZE, file.size));
         const form  = new FormData();
-        form.append("chunk",       chunk);
         form.append("fileId",      fileId);
         form.append("chunkIndex",  String(i));
         form.append("totalChunks", String(totalChunks));
         form.append("filename",    file.name);
+        form.append("chunk",       chunk);
         const res = await fetch("/api/clipper/upload-chunk", { method: "POST", body: form });
         if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error((d as any).error ?? "Chunk upload failed"); }
         setUploadProgress(Math.round(((i + 1) / totalChunks) * 90));

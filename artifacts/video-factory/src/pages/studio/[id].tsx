@@ -307,11 +307,11 @@ export default function StudioEditor() {
         const chunk = file.slice(start, end);
 
         const form = new FormData();
-        form.append("chunk",       chunk);
         form.append("fileId",      fileId);
         form.append("chunkIndex",  String(i));
         form.append("totalChunks", String(totalChunks));
         form.append("filename",    file.name);
+        form.append("chunk",       chunk);
 
         const res = await fetch("/api/studio/upload-chunk", { method: "POST", body: form });
         if (!res.ok) {
