@@ -40,9 +40,9 @@ export default defineConfig({
               root: path.resolve(import.meta.dirname, ".."),
             }),
           ),
-          await import("@replit/vite-plugin-dev-banner").then((m) =>
-            m.devBanner(),
-          ),
+          // devBanner() intentionally excluded: it injects a root-relative script
+          // URL (/@replit/...) that the sub-path proxy cannot route, causing a
+          // SyntaxError: Invalid or unexpected token crash in the browser.
         ]
       : []),
   ],
