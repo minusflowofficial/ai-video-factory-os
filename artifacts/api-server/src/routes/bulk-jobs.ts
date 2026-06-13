@@ -35,7 +35,7 @@ router.post("/bulk-jobs", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const { niche, goal, totalVideos, aspectRatio } = parsed.data;
+  const { niche, goal, totalVideos, aspectRatio, language } = parsed.data as any;
 
   const [job] = await db.insert(bulkJobsTable).values({
     niche,
@@ -48,10 +48,11 @@ router.post("/bulk-jobs", async (req, res): Promise<void> => {
     status: "pending",
   }).returning();
 
-  const ar = aspectRatio ?? "9:16";
+  const ar   = aspectRatio ?? "9:16";
+  const lang = language    ?? "English";
 
   if (goal === "quotes") {
-    runBulkQuotesPipeline(job.id, niche, totalVideos, ar).catch(() => {});
+    runBulkQuotesPipeline(job.id, niche, totalVideos, ar, lang).catch(() => {});
   } else {
     runBulkPipeline(job.id, niche, totalVideos, ar).catch(() => {});
   }
@@ -159,8 +160,15 @@ async function runBulkPipeline(jobId: number, niche: string, totalVideos: number
   await markFinished(jobId, completedCount, failedCount);
 }
 
+// ── Music moods for variety (one per video index, cycles) ────────────────────
+const MUSIC_MOODS = [
+  "calm", "upbeat", "inspiring", "emotional", "energetic",
+  "peaceful", "powerful", "dramatic", "motivational", "serene",
+  "cinematic", "ambient", "happy", "melancholic", "triumphant",
+];
+
 // ── Quotes bulk pipeline ─────────────────────────────────────────────────────
-async function runBulkQuotesPipeline(jobId: number, topic: string, totalVideos: number, aspectRatio: string) {
+async function runBulkQuotesPipeline(jobId: number, topic: string, totalVideos: number, aspectRatio: string, language = "English") {
   const CONCURRENCY = 2;
   const OUTPUTS_DIR = "/tmp/quote-outputs";
   fs.mkdirSync(OUTPUTS_DIR, { recursive: true });
@@ -172,7 +180,7 @@ async function runBulkQuotesPipeline(jobId: number, topic: string, totalVideos: 
   }).where(eq(bulkJobsTable.id, jobId));
 
   // Generate all quotes upfront via AI
-  const quotes = await generateQuotes(topic, totalVideos);
+  const quotes = await generateQuotes(topic, totalVideos, language);
 
   let completedCount = 0;
   let failedCount = 0;
@@ -182,31 +190,36 @@ async function runBulkQuotesPipeline(jobId: number, topic: string, totalVideos: 
     if (!current || current.status === "cancelled") return;
 
     try {
-      // Pick unique variation search term per video
+      // Pick unique variation keyword + music mood per video index for variety
       const variation = VARIATION_WORDS[index % VARIATION_WORDS.length];
+      const mood      = MUSIC_MOODS[index % MUSIC_MOODS.length];
       const searchTerms = [topic, variation, "cinematic"];
 
-      // Fetch unique bg video + music per video
+      // Fetch unique bg video + music per video (different mood per index)
       const videoIds = await searchMixkitVideos(searchTerms, 1);
       const videoId  = videoIds[0];
       const bgUrl    = mixkitVideoUrl(videoId);
-      const musicUrl = await searchMixkitMusic([topic, "calm", "inspirational", variation]);
+      const musicUrl = await searchMixkitMusic([mood, topic, variation]);
 
       const outputPath = path.join(OUTPUTS_DIR, `quote-${jobId}-${index}-${Date.now()}.mp4`);
       const scriptPath = path.resolve("../../scripts/create_quote_video.py");
 
-      await execFileAsync("python3", [
+      const { stdout, stderr } = await execFileAsync("python3", [
         scriptPath,
         quoteText,
         bgUrl,
         musicUrl,
         outputPath,
         aspectRatio,
-      ], { timeout: 180_000 });
+        language,
+      ], { timeout: 240_000 });
+
+      if (stderr) console.error(`[bulk-quotes] video ${index} stderr:`, stderr.slice(-500));
+      if (!stdout.startsWith("OK:")) throw new Error(`Script output unexpected: ${stdout.slice(0, 200)}`);
 
       completedCount++;
-    } catch (e) {
-      console.error(`[bulk-quotes] job ${jobId} video ${index} failed:`, e);
+    } catch (e: any) {
+      console.error(`[bulk-quotes] job ${jobId} video ${index} failed: ${e?.message ?? e}`);
       failedCount++;
     }
 
@@ -230,9 +243,11 @@ async function runBulkQuotesPipeline(jobId: number, topic: string, totalVideos: 
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-async function generateQuotes(topic: string, count: number): Promise<string[]> {
+async function generateQuotes(topic: string, count: number, language = "English"): Promise<string[]> {
   const baseUrl = process.env.AI_INTEGRATIONS_OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1";
   const apiKey  = process.env.AI_INTEGRATIONS_OPENROUTER_API_KEY ?? "";
+
+  console.log(`[bulk-quotes] Generating ${count} quotes | topic="${topic}" | language="${language}"`);
 
   try {
     const res = await fetch(`${baseUrl}/chat/completions`, {
@@ -242,11 +257,11 @@ async function generateQuotes(topic: string, count: number): Promise<string[]> {
         model: "qwen/qwen3-flash",
         messages: [{
           role: "user",
-          content: `Generate exactly ${count} unique, powerful ${topic} quotes for short videos. Each quote must be 1-2 sentences, emotionally resonant, and completely different from the others. Return ONLY a valid JSON array of strings — no markdown, no explanation, no numbering. Example: ["Quote one.", "Quote two."]`,
+          content: `Generate exactly ${count} unique, powerful ${topic} quotes for short videos. Write every quote in ${language}. Each quote must be 1-2 sentences, emotionally resonant, and completely different from the others. Return ONLY a valid JSON array of strings — no markdown, no explanation, no numbering, no <think> tags. Example: ["Quote one.", "Quote two."]`,
         }],
-        max_tokens: Math.min(4000, count * 80),
+        max_tokens: Math.min(6000, count * 100),
       }),
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(90_000),
     });
 
     if (res.ok) {

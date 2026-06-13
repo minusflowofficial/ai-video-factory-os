@@ -485,6 +485,8 @@ components:
           type: string
         aspectRatio:
           type: string
+        language:
+          type: string
 
     Settings:
       type: object

@@ -334,7 +334,8 @@ export const CreateBulkJobBody = zod.object({
   "goal": zod.string().optional(),
   "totalVideos": zod.number(),
   "duration": zod.string().optional(),
-  "aspectRatio": zod.string().optional()
+  "aspectRatio": zod.string().optional(),
+  "language": zod.string().optional(),
 })
 
 

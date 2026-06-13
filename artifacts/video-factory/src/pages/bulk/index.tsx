@@ -20,7 +20,7 @@ export default function BulkFactory() {
   const cancelJob = useCancelBulkJob();
 
   const [mode, setMode] = useState<JobMode>("standard");
-  const [form, setForm] = useState({ niche: "", totalVideos: "10", aspectRatio: "9:16" });
+  const [form, setForm] = useState({ niche: "", totalVideos: "10", aspectRatio: "9:16", language: "English" });
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
@@ -34,7 +34,8 @@ export default function BulkFactory() {
           totalVideos: parseInt(form.totalVideos, 10),
           aspectRatio: form.aspectRatio,
           duration: "60s",
-        },
+          language: mode === "quotes" ? form.language : undefined,
+        } as any,
       },
       {
         onSuccess: () => {
@@ -143,6 +144,31 @@ export default function BulkFactory() {
                 </SelectContent>
               </Select>
             </div>
+
+            {mode === "quotes" && (
+              <div className="w-36">
+                <label className="text-xs font-medium text-gray-600 block mb-1.5">Language</label>
+                <Select value={form.language} onValueChange={v => set("language", v)}>
+                  <SelectTrigger className="h-9 text-sm border-gray-200 bg-gray-50">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="English">English</SelectItem>
+                    <SelectItem value="Spanish">Spanish</SelectItem>
+                    <SelectItem value="Arabic">Arabic</SelectItem>
+                    <SelectItem value="Hindi">Hindi</SelectItem>
+                    <SelectItem value="Urdu">Urdu</SelectItem>
+                    <SelectItem value="French">French</SelectItem>
+                    <SelectItem value="German">German</SelectItem>
+                    <SelectItem value="Portuguese">Portuguese</SelectItem>
+                    <SelectItem value="Chinese">Chinese</SelectItem>
+                    <SelectItem value="Japanese">Japanese</SelectItem>
+                    <SelectItem value="Turkish">Turkish</SelectItem>
+                    <SelectItem value="Indonesian">Indonesian</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <Button
               onClick={handleSubmit}

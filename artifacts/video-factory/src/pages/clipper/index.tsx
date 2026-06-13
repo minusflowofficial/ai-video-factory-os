@@ -81,6 +81,7 @@ export default function ClipperPage() {
   const [aspectRatio,  setAspect]      = useState("9:16");
   const [captionStyle, setCaption]     = useState("Bold Yellow");
   const [hookFilter,   setHookFilter]  = useState("Any");
+  const [showHook,     setShowHook]    = useState(true);
   const [durPreset,    setDurPreset]   = useState(1); // index into DURATION_PRESETS
   const [previewClip,  setPreviewClip] = useState<number | null>(null);
 
@@ -180,7 +181,7 @@ export default function ClipperPage() {
     setStarting(true);
     try {
       const dp = DURATION_PRESETS[durPreset] ?? DURATION_PRESETS[1];
-      const opts = { numClips, aspectRatio, captionStyle, hookFilter: hookFilter === "Any" ? null : hookFilter, minDuration: parseInt(dp.min), maxDuration: parseInt(dp.max) };
+      const opts = { numClips, aspectRatio, captionStyle, hookFilter: hookFilter === "Any" ? null : hookFilter, minDuration: parseInt(dp.min), maxDuration: parseInt(dp.max), showHook };
       let endpoint: string;
       let body: object;
       if (tab === "upload") {
@@ -477,6 +478,29 @@ export default function ClipperPage() {
                         hookFilter === h ? "bg-amber-400 text-amber-950 border-amber-400" : "bg-gray-50 border-gray-100 text-gray-500 hover:border-amber-200 hover:text-amber-700"
                       )}>{h}</button>
                   ))}
+                </div>
+              </div>
+              {/* Hook title overlay toggle */}
+              <div className="col-span-2 bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
+                      <TrendingUp className="w-3 h-3" /> Hook Title Overlay
+                    </p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">Show AI-generated hook text at the top of each clip</p>
+                  </div>
+                  <button
+                    onClick={() => setShowHook(v => !v)}
+                    className={cn(
+                      "relative w-10 h-5 rounded-full transition-colors shrink-0",
+                      showHook ? "bg-amber-400" : "bg-gray-200",
+                    )}
+                  >
+                    <span className={cn(
+                      "absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform",
+                      showHook ? "translate-x-5" : "translate-x-0.5",
+                    )} />
+                  </button>
                 </div>
               </div>
             </div>

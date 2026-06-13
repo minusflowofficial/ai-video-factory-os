@@ -9,6 +9,8 @@ Features:
     each following one cluster
   - ASS captions: hook title at TOP, 3-word bubbles at BOTTOM
   - Sizes are pixel-accurate (PlayResX/Y = actual video resolution)
+  - Optional SFX: synthetic chime mixed in at clip start
+  - show_hook flag: skip burning the hook title overlay when False
 """
 
 import sys, json, subprocess, os, pathlib
@@ -59,11 +61,6 @@ ASPECT_CONFIGS = {
 # ── Face detection ─────────────────────────────────────────────────────────────
 
 def detect_face_clusters(video_path: str, num_samples: int = 10):
-    """
-    Sample frames, run face detection, return a list of (cx, cy) face centres.
-    Returns (centres_list, src_w, src_h).
-    Falls back to empty list if cv2 unavailable or detection fails.
-    """
     if not CV2_OK:
         return [], 0, 0
     try:
@@ -102,10 +99,6 @@ def detect_face_clusters(video_path: str, num_samples: int = 10):
 
 
 def cluster_centres(centres, src_w):
-    """
-    Partition face centres into left/right clusters based on the frame midpoint.
-    Returns (left_centres, right_centres).
-    """
     mid   = src_w / 2
     left  = [(cx, cy) for cx, cy in centres if cx < mid]
     right = [(cx, cy) for cx, cy in centres if cx >= mid]
@@ -120,7 +113,6 @@ def avg_point(pts):
 
 
 def clamp_crop(cx_desired, cy_desired, src_w, src_h, crop_w, crop_h):
-    """Centre the crop on (cx_desired, cy_desired) then clamp to frame bounds."""
     x = cx_desired - crop_w // 2
     y = cy_desired - crop_h // 2
     x = max(0, min(x, src_w - crop_w))
@@ -130,7 +122,7 @@ def clamp_crop(cx_desired, cy_desired, src_w, src_h, crop_w, crop_h):
 
 # ── ASS subtitle builder ───────────────────────────────────────────────────────
 
-def make_ass(captions, hook, clip_duration, target_w, target_h, cap_style):
+def make_ass(captions, hook, clip_duration, target_w, target_h, cap_style, show_hook=True):
     ref     = min(target_w, target_h)
     hook_fs = max(44, int(ref * 0.068))
     cap_fs  = max(36, int(ref * 0.052))
@@ -142,28 +134,34 @@ def make_ass(captions, hook, clip_duration, target_w, target_h, cap_style):
     )
     shadow = 1 if bstyle == 1 else 0
 
+    # WrapStyle 0 = smart wrap (even line lengths, centred); most reliable for libass
     header = (
         f"[Script Info]\nScriptType: v4.00+\n"
         f"PlayResX: {target_w}\nPlayResY: {target_h}\n"
-        f"ScaledBorderAndShadow: yes\nWrapStyle: 1\n\n"
+        f"ScaledBorderAndShadow: yes\nWrapStyle: 0\n\n"
         f"[V4+ Styles]\n"
         f"Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
         f"OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
         f"ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         f"Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        # Alignment 8 = top-centre; MarginL/R = 0 for true centre
         f"Style: HookTop,Noto Sans CJK JP,{hook_fs},&H00FFFFFF,&H000000FF,&H00000000,"
-        f"&H00000000,1,0,0,0,100,100,1,0,1,5,1,8,50,50,{top_mg},1\n"
+        f"&H00000000,1,0,0,0,100,100,1,0,1,5,1,8,0,0,{top_mg},1\n"
+        # Alignment 2 = bottom-centre; MarginL/R = 0 for true centre
         f"Style: Caption,Noto Sans CJK JP,{cap_fs},{pri},&H000000FF,{out_c},{back},"
-        f"1,0,0,0,100,100,0,0,{bstyle},{outline_w},{shadow},2,50,50,{bot_mg},1\n\n"
+        f"1,0,0,0,100,100,0,0,{bstyle},{outline_w},{shadow},2,0,0,{bot_mg},1\n\n"
         f"[Events]\n"
         f"Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
 
     events = []
-    if hook:
+    # {\an8} = explicit top-centre alignment override (belt-and-suspenders)
+    if hook and show_hook:
         hook_end  = min(3.5, clip_duration * 0.20)
         safe_hook = hook.replace("\n", " ").replace(",", "，")
-        events.append(f"Dialogue: 0,{ass_ts(0)},{ass_ts(hook_end)},HookTop,,0,0,0,,{safe_hook}")
+        events.append(
+            f"Dialogue: 0,{ass_ts(0)},{ass_ts(hook_end)},HookTop,,0,0,0,,{{\\an8}}{safe_hook}"
+        )
 
     for cap in captions:
         s    = max(0.0, float(cap.get("start", 0)))
@@ -178,8 +176,9 @@ def make_ass(captions, hook, clip_duration, target_w, target_h, cap_style):
             cs = s + i * dur
             ce = s + (i + 1) * dur
             display = chunk.upper() if cap_style in ("Bold Yellow", "Fire") else chunk
+            # {\an2} = explicit bottom-centre alignment override
             events.append(
-                f"Dialogue: 0,{ass_ts(cs)},{ass_ts(ce)},Caption,,0,0,0,,{display.replace(',','，')}"
+                f"Dialogue: 0,{ass_ts(cs)},{ass_ts(ce)},Caption,,0,0,0,,{{\\an2}}{display.replace(',','，')}"
             )
 
     return header + "\n".join(events)
@@ -199,8 +198,8 @@ def probe_dimensions(path: str):
 # ── Encode one crop ────────────────────────────────────────────────────────────
 
 def encode_crop(raw_clip, out_path, cx, cy, crop_w, crop_h,
-                target_w, target_h, ass_path, tmp_dir):
-    """Crop + scale → burn ASS captions → output MP4."""
+                target_w, target_h, ass_path, tmp_dir, add_sfx=False):
+    """Crop + scale → burn ASS captions (+ optional SFX chime) → output MP4."""
     cropped = out_path + "_tmp_crop.mp4"
 
     subprocess.run([
@@ -214,13 +213,37 @@ def encode_crop(raw_clip, out_path, cx, cy, crop_w, crop_h,
 
     safe_ass   = ass_path.replace("\\", "/").replace(":", "\\:")
     safe_fonts = FONTS_DIR.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
-    subprocess.run([
-        "ffmpeg", "-y", "-i", cropped,
-        "-vf", f"subtitles={safe_ass}:fontsdir={safe_fonts}",
-        "-c:v", "libx264", "-c:a", "aac",
-        "-preset", "ultrafast", "-crf", "26", "-threads", "0",
-        out_path,
-    ], check=True, capture_output=True)
+
+    if add_sfx:
+        # Mix a short synthetic chime (dual-freq tone, 0.6 s) at the very start
+        # alongside the original audio, then burn captions on the video stream.
+        sfx_expr = (
+            "sin(2*PI*880*t)*exp(-t*6)*0.40+"
+            "sin(2*PI*1320*t)*exp(-t*12)*0.20"
+        )
+        fc = (
+            f"[0:v]subtitles={safe_ass}:fontsdir={safe_fonts}[vout];"
+            f"aevalsrc={sfx_expr}:c=mono:s=44100:d=0.6[sfx];"
+            "[0:a][sfx]amix=inputs=2:duration=first:dropout_transition=0.2[aout]"
+        )
+        cmd = [
+            "ffmpeg", "-y", "-i", cropped,
+            "-filter_complex", fc,
+            "-map", "[vout]", "-map", "[aout]",
+            "-c:v", "libx264", "-c:a", "aac",
+            "-preset", "ultrafast", "-crf", "26", "-threads", "0",
+            out_path,
+        ]
+    else:
+        cmd = [
+            "ffmpeg", "-y", "-i", cropped,
+            "-vf", f"subtitles={safe_ass}:fontsdir={safe_fonts}",
+            "-c:v", "libx264", "-c:a", "aac",
+            "-preset", "ultrafast", "-crf", "26", "-threads", "0",
+            out_path,
+        ]
+
+    subprocess.run(cmd, check=True, capture_output=True)
 
     try:
         os.remove(cropped)
@@ -239,6 +262,8 @@ def run(data: dict):
     caption_style = data.get("caption_style", "Bold Yellow")
     hook          = data.get("hook",          "")
     captions      = data.get("captions",      [])
+    show_hook     = data.get("show_hook",     True)
+    add_sfx       = data.get("add_sfx",       False)
 
     start_sec     = time_to_seconds(start_time)
     end_sec       = time_to_seconds(end_time)
@@ -272,8 +297,6 @@ def run(data: dict):
     # ── 4: Face detection → smart crop ────────────────────────────────────────
     centres, _, _ = detect_face_clusters(raw_clip, num_samples=10)
 
-    # Decide whether we have 2 distinct face clusters (for 9:16 only)
-    # Threshold: each cluster needs ≥2 detections & clusters are >25% of width apart
     split_output = False
     left_c, right_c = [], []
 
@@ -292,44 +315,39 @@ def run(data: dict):
     ass_path = os.path.join(tmp_dir, "captions.ass")
     with open(ass_path, "w", encoding="utf-8") as f:
         f.write(make_ass(captions, hook, clip_duration,
-                         target_w, target_h, caption_style))
+                         target_w, target_h, caption_style, show_hook=show_hook))
 
     outputs = []
 
     if split_output:
-        # ── Two crops: one per face cluster ──────────────────────────────────
         left_avg  = avg_point(left_c)
         right_avg = avg_point(right_c)
 
         for label, pt in [("A", left_avg), ("B", right_avg)]:
             face_cx, face_cy = pt
-            # Vertically: keep face in upper-third of the 9:16 crop
             face_cy_adj = max(face_cy, int(crop_h * 0.30))
             cx, cy = clamp_crop(face_cx, face_cy_adj, src_w, src_h, crop_w, crop_h)
             out = f"{base}_{label}.mp4"
             encode_crop(raw_clip, out, cx, cy, crop_w, crop_h,
-                        target_w, target_h, ass_path, tmp_dir)
+                        target_w, target_h, ass_path, tmp_dir, add_sfx=add_sfx)
             size_mb = round(os.path.getsize(out) / 1024 / 1024, 2)
             outputs.append({"output": out, "size_mb": size_mb,
                             "face_zone": "left" if label == "A" else "right"})
     else:
-        # ── Single crop ───────────────────────────────────────────────────────
         if centres:
             all_avg = avg_point(centres)
             face_cx, face_cy = all_avg
-            # For 9:16: keep face in upper half of the portrait crop
             if aspect_ratio == "9:16":
                 face_cy = max(face_cy, int(crop_h * 0.30))
             cx, cy = clamp_crop(face_cx, face_cy, src_w, src_h, crop_w, crop_h)
         else:
-            # Fallback: center crop, slightly above middle (face-friendly)
             cx = (src_w - crop_w) // 2
             cy = max(0, int(src_h * 0.10))
             cx = max(0, min(cx, src_w - crop_w))
             cy = max(0, min(cy, src_h - crop_h))
 
         encode_crop(raw_clip, output_path, cx, cy, crop_w, crop_h,
-                    target_w, target_h, ass_path, tmp_dir)
+                    target_w, target_h, ass_path, tmp_dir, add_sfx=add_sfx)
         size_mb = round(os.path.getsize(output_path) / 1024 / 1024, 2)
         outputs.append({"output": output_path, "size_mb": size_mb,
                         "face_zone": "full"})
@@ -345,7 +363,6 @@ def run(data: dict):
         "ok":           True,
         "outputs":      outputs,
         "duration_sec": round(clip_duration, 1),
-        # backward-compat fields (first output)
         "output":       outputs[0]["output"],
         "size_mb":      outputs[0]["size_mb"],
     }))

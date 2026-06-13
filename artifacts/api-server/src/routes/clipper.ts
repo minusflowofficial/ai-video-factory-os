@@ -323,7 +323,7 @@ Return ONLY a JSON array (no other text):
 // ── Create a single clip (returns 1 or 2 outputs when face-split occurs) ──────
 async function createClip(
   clip: any, videoPath: string, segments: any[], aspectRatio: string,
-  captionStyle: string, outDir: string,
+  captionStyle: string, outDir: string, showHook = true,
 ): Promise<Array<{ downloadToken: string; sizeMb: number; faceZone?: string }>> {
   const startSec = timeStrToSeconds(clip.startTime);
   const endSec   = timeStrToSeconds(clip.endTime);
@@ -352,6 +352,7 @@ async function createClip(
     caption_style: captionStyle,
     hook:          clip.hook ?? clip.topic ?? "",
     captions:      clipCaptions,
+    show_hook:     showHook,
   });
 
   const { stdout } = await execFileAsync(PYTHON, [CREATE_CLIP_SCRIPT, input], { timeout: 600_000 });
@@ -374,8 +375,9 @@ async function createClip(
 async function runPipeline(job: ClipJob, opts: {
   videoId?: string; localVideoPath?: string; numClips: number; aspectRatio: string;
   captionStyle: string; hookFilter: string | null; minDuration: number; maxDuration: number;
+  showHook?: boolean;
 }) {
-  const { videoId, localVideoPath, numClips, aspectRatio, captionStyle, hookFilter, minDuration, maxDuration } = opts;
+  const { videoId, localVideoPath, numClips, aspectRatio, captionStyle, hookFilter, minDuration, maxDuration, showHook = true } = opts;
   try {
     // 1. Get video path
     let videoPath: string;
@@ -434,7 +436,7 @@ async function runPipeline(job: ClipJob, opts: {
         jobClip.status = "processing";
         try {
           const results = await createClip(
-            aiClip, videoPath, segments, aspectRatio, captionStyle, job.dir,
+            aiClip, videoPath, segments, aspectRatio, captionStyle, job.dir, showHook,
           );
 
           // Primary output (always index 0)
@@ -565,7 +567,7 @@ router.post("/clipper/upload", (req, res, next) => {
 
 // POST /api/clipper/process — YouTube URL pipeline
 router.post("/clipper/process", async (req, res): Promise<void> => {
-  const { url, numClips = 5, aspectRatio = "9:16", captionStyle = "Bold Yellow", hookFilter = null, minDuration = 30, maxDuration = 90 } = req.body ?? {};
+  const { url, numClips = 5, aspectRatio = "9:16", captionStyle = "Bold Yellow", hookFilter = null, minDuration = 30, maxDuration = 90, showHook = true } = req.body ?? {};
   if (!url) { res.status(400).json({ error: "url required" }); return; }
   const videoId = extractYouTubeId(String(url));
   if (!videoId) { res.status(400).json({ error: "Invalid YouTube URL" }); return; }
@@ -579,13 +581,13 @@ router.post("/clipper/process", async (req, res): Promise<void> => {
     sourceType: "youtube", sourceUrl: String(url), aspectRatio, captionStyle,
   };
   jobs.set(jobId, job);
-  runPipeline(job, { videoId, numClips, aspectRatio, captionStyle, hookFilter, minDuration, maxDuration }).catch(() => {});
+  runPipeline(job, { videoId, numClips, aspectRatio, captionStyle, hookFilter, minDuration, maxDuration, showHook: Boolean(showHook) }).catch(() => {});
   res.json({ jobId });
 });
 
 // POST /api/clipper/process-local — uploaded file pipeline
 router.post("/clipper/process-local", async (req, res): Promise<void> => {
-  const { filePath, videoTitle, filename, numClips = 5, aspectRatio = "9:16", captionStyle = "Bold Yellow", hookFilter = null, minDuration = 30, maxDuration = 90 } = req.body ?? {};
+  const { filePath, videoTitle, filename, numClips = 5, aspectRatio = "9:16", captionStyle = "Bold Yellow", hookFilter = null, minDuration = 30, maxDuration = 90, showHook = true } = req.body ?? {};
   if (!filePath) { res.status(400).json({ error: "filePath required" }); return; }
   if (!fs.existsSync(filePath)) { res.status(400).json({ error: "File not found" }); return; }
 
@@ -600,7 +602,7 @@ router.post("/clipper/process-local", async (req, res): Promise<void> => {
     aspectRatio, captionStyle,
   };
   jobs.set(jobId, job);
-  runPipeline(job, { localVideoPath: filePath, numClips, aspectRatio, captionStyle, hookFilter, minDuration, maxDuration }).catch(() => {});
+  runPipeline(job, { localVideoPath: filePath, numClips, aspectRatio, captionStyle, hookFilter, minDuration, maxDuration, showHook: Boolean(showHook) }).catch(() => {});
   res.json({ jobId });
 });
 
