@@ -483,8 +483,8 @@ export default function ClipperPage() {
                 </div>
               )}
 
-              {/* 2-column grid */}
-              <div className="grid grid-cols-2 gap-3">
+              {/* 4-column compact grid */}
+              <div className="grid grid-cols-4 gap-2">
                 {job.clips.map(clip => {
                   const isExpanded = expanded === clip.id;
                   const isDoneClip = clip.status === "done" && !!clip.downloadToken;
@@ -496,112 +496,91 @@ export default function ClipperPage() {
                       clip.status === "error" ? "border-red-200" : "border-gray-100"
                     )}>
 
-                      {/* ── Video preview area ── */}
+                      {/* ── Video preview ── */}
                       <div className={cn(
                         "relative bg-black overflow-hidden",
-                        aspectRatio === "9:16" ? "aspect-[9/16]" : aspectRatio === "1:1" ? "aspect-square" : "aspect-video"
+                        aspectRatio === "9:16" ? "aspect-[9/16]" :
+                        aspectRatio === "1:1"  ? "aspect-square"  : "aspect-video"
                       )}>
                         {isDoneClip ? (
                           <>
                             <video
                               key={clip.downloadToken}
                               src={`/api/clipper/preview/${clip.downloadToken}`}
+                              controls
                               preload="metadata"
                               className="w-full h-full object-cover"
                             />
-                            {/* Viral score badge */}
+                            {/* Viral score */}
                             <div className={cn(
-                              "absolute top-2 right-2 text-xs font-black px-2 py-0.5 rounded-full",
+                              "absolute top-1.5 right-1.5 text-[9px] font-black px-1.5 py-0.5 rounded-full pointer-events-none",
                               clip.viralScore >= 9 ? "bg-emerald-500 text-white" :
                               clip.viralScore >= 7 ? "bg-amber-400 text-amber-950" : "bg-gray-700 text-gray-200"
                             )}>{clip.viralScore}/10</div>
-                            {/* Duration badge */}
-                            <div className="absolute bottom-2 left-2 text-[10px] font-bold bg-black/70 text-white px-2 py-0.5 rounded-full">{clip.duration}</div>
-                            {/* Hook type */}
-                            {clip.hookType && (
-                              <div className={cn(
-                                "absolute bottom-2 right-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full border",
-                                HOOK_COLORS[clip.hookType] ?? "bg-gray-50 text-gray-500 border-gray-100"
-                              )}>{clip.hookType}</div>
-                            )}
+                            {/* Duration */}
+                            <div className="absolute bottom-1.5 left-1.5 text-[9px] font-bold bg-black/70 text-white px-1.5 py-0.5 rounded-full pointer-events-none">{clip.duration}</div>
                           </>
                         ) : (
-                          <div className="w-full h-full flex flex-col items-center justify-center gap-2">
+                          <div className="w-full h-full flex flex-col items-center justify-center gap-1.5">
                             {clip.status === "processing" ? (
-                              <><Loader2 className="w-7 h-7 text-amber-400 animate-spin" /><span className="text-[10px] text-amber-400 font-medium">Processing…</span></>
+                              <><Loader2 className="w-6 h-6 text-amber-400 animate-spin" /><span className="text-[9px] text-amber-400">Processing…</span></>
                             ) : clip.status === "error" ? (
-                              <><AlertCircle className="w-7 h-7 text-red-400" /><span className="text-[10px] text-red-400">Failed</span></>
+                              <><AlertCircle className="w-6 h-6 text-red-400" /><span className="text-[9px] text-red-400">Failed</span></>
                             ) : (
-                              <><Clock className="w-7 h-7 text-gray-600" /><span className="text-[10px] text-gray-500">Queued</span></>
+                              <><Clock className="w-6 h-6 text-gray-600" /><span className="text-[9px] text-gray-500">Queued</span></>
                             )}
                           </div>
                         )}
                       </div>
 
                       {/* ── Card body ── */}
-                      <div className="flex flex-col flex-1 p-3 gap-2">
+                      <div className="flex flex-col flex-1 px-2 py-2 gap-1.5">
 
-                        {/* Topic title */}
-                        <p className="text-xs font-semibold text-gray-800 leading-snug line-clamp-2">{clip.title}</p>
-
-                        {/* Suggested platform title */}
-                        {clip.suggestedTitle && (
-                          <div className="flex items-start gap-1.5">
-                            <FileText className="w-3 h-3 text-amber-500 mt-0.5 shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center justify-between gap-1">
-                                <p className="text-[9px] font-bold text-amber-600 uppercase tracking-wider">Title</p>
-                                <button onClick={() => copyText(clip.suggestedTitle ?? "", `title-${clip.id}`)} className="text-gray-300 hover:text-amber-500 transition-colors">
-                                  {copied === `title-${clip.id}` ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
-                                </button>
-                              </div>
-                              <p className="text-[10px] text-gray-700 font-medium leading-tight line-clamp-2">{clip.suggestedTitle}</p>
-                            </div>
+                        {/* Suggested title + copy */}
+                        {clip.suggestedTitle ? (
+                          <div className="flex items-start gap-1">
+                            <p className="text-[10px] font-bold text-gray-800 leading-tight line-clamp-2 flex-1">{clip.suggestedTitle}</p>
+                            <button onClick={() => copyText(clip.suggestedTitle ?? "", `title-${clip.id}`)} className="text-gray-300 hover:text-amber-500 shrink-0 mt-0.5 transition-colors">
+                              {copied === `title-${clip.id}` ? <Check className="w-2.5 h-2.5 text-emerald-500" /> : <Copy className="w-2.5 h-2.5" />}
+                            </button>
                           </div>
+                        ) : (
+                          <p className="text-[10px] font-bold text-gray-700 line-clamp-2">{clip.title}</p>
                         )}
 
                         {/* Hashtags */}
                         {clip.hashtags && clip.hashtags.length > 0 && (
-                          <div className="flex items-start gap-1">
-                            <Hash className="w-3 h-3 text-blue-400 mt-0.5 shrink-0" />
-                            <div className="flex flex-wrap gap-1 flex-1">
-                              {clip.hashtags.slice(0, 6).map(tag => (
-                                <button key={tag} onClick={() => copyText(tag, `tag-${clip.id}-${tag}`)}
-                                  className="text-[9px] font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-100 rounded-full px-1.5 py-0.5 transition-colors">
-                                  {tag}
-                                </button>
-                              ))}
-                              {copied?.startsWith(`tag-${clip.id}-`) && (
-                                <span className="text-[9px] text-emerald-600 font-medium self-center">Copied!</span>
-                              )}
-                            </div>
+                          <div className="flex flex-wrap gap-1">
+                            {clip.hashtags.slice(0, 5).map(tag => (
+                              <button key={tag}
+                                onClick={() => copyText(tag, `tag-${clip.id}-${tag}`)}
+                                className="text-[8px] font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-100 rounded-full px-1 py-0.5 transition-colors leading-none">
+                                {tag}
+                              </button>
+                            ))}
+                            <button onClick={() => copyText((clip.hashtags ?? []).join(" "), `tags-all-${clip.id}`)}
+                              className="text-[8px] text-gray-400 hover:text-blue-500 transition-colors ml-auto shrink-0">
+                              {copied === `tags-all-${clip.id}` ? <Check className="w-2.5 h-2.5 text-emerald-500 inline" /> : <Copy className="w-2.5 h-2.5 inline" />}
+                            </button>
                           </div>
                         )}
 
-                        {/* Copy all hashtags button */}
-                        {clip.hashtags && clip.hashtags.length > 0 && (
-                          <button onClick={() => copyText((clip.hashtags ?? []).join(" "), `tags-all-${clip.id}`)}
-                            className="text-[9px] text-blue-500 hover:text-blue-700 font-semibold flex items-center gap-1 self-start">
-                            {copied === `tags-all-${clip.id}` ? <Check className="w-2.5 h-2.5 text-emerald-500" /> : <Copy className="w-2.5 h-2.5" />}
-                            {copied === `tags-all-${clip.id}` ? "Copied!" : "Copy all hashtags"}
-                          </button>
-                        )}
-
-                        {/* Description (expandable) */}
+                        {/* Description expandable */}
                         {clip.description && (
                           <div>
-                            <button onClick={() => setExpanded(isExpanded ? null : clip.id)}
-                              className="flex items-center gap-1 text-[9px] font-bold text-gray-400 hover:text-gray-600 uppercase tracking-wider transition-colors w-full text-left">
-                              <FileText className="w-3 h-3" />
-                              Description
-                              {isExpanded ? <ChevronUp className="w-3 h-3 ml-auto" /> : <ChevronDown className="w-3 h-3 ml-auto" />}
+                            <button
+                              onClick={() => setExpanded(isExpanded ? null : clip.id)}
+                              className="flex items-center gap-1 text-[8px] font-bold text-gray-400 hover:text-gray-600 uppercase tracking-wider w-full text-left transition-colors">
+                              <FileText className="w-2.5 h-2.5" />
+                              Caption
+                              {isExpanded ? <ChevronUp className="w-2.5 h-2.5 ml-auto" /> : <ChevronDown className="w-2.5 h-2.5 ml-auto" />}
                             </button>
                             {isExpanded && (
-                              <div className="mt-1.5 bg-gray-50 rounded-lg px-2.5 py-2 border border-gray-100">
-                                <div className="flex items-start justify-between gap-1">
-                                  <p className="text-[10px] text-gray-600 leading-relaxed flex-1">{clip.description}</p>
-                                  <button onClick={() => copyText(clip.description ?? "", `desc-${clip.id}`)} className="text-gray-300 hover:text-amber-500 transition-colors shrink-0 mt-0.5">
-                                    {copied === `desc-${clip.id}` ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                              <div className="mt-1 bg-gray-50 rounded-lg px-2 py-1.5 border border-gray-100">
+                                <div className="flex items-start gap-1">
+                                  <p className="text-[9px] text-gray-600 leading-relaxed flex-1">{clip.description}</p>
+                                  <button onClick={() => copyText(clip.description ?? "", `desc-${clip.id}`)} className="text-gray-300 hover:text-amber-500 shrink-0 mt-0.5">
+                                    {copied === `desc-${clip.id}` ? <Check className="w-2.5 h-2.5 text-emerald-500" /> : <Copy className="w-2.5 h-2.5" />}
                                   </button>
                                 </div>
                               </div>
@@ -609,37 +588,26 @@ export default function ClipperPage() {
                           </div>
                         )}
 
-                        {/* Hook */}
-                        {clip.hook && (
-                          <div className="bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-1.5 flex items-start gap-1.5">
-                            <div className="flex-1 min-w-0">
-                              <p className="text-[8px] font-bold text-amber-600 uppercase tracking-wider">Hook</p>
-                              <p className="text-[10px] font-semibold text-gray-800 leading-snug">"{clip.hook}"</p>
-                            </div>
-                            <button onClick={() => copyText(clip.hook, `hook-${clip.id}`)} className="text-amber-300 hover:text-amber-600 shrink-0 mt-0.5">
-                              {copied === `hook-${clip.id}` ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
-                            </button>
-                          </div>
+                        {clip.error && (
+                          <div className="text-[8px] text-red-600 bg-red-50 border border-red-100 rounded px-1.5 py-1">{clip.error}</div>
                         )}
 
-                        {clip.error && <div className="text-[9px] text-red-600 bg-red-50 border border-red-100 rounded-lg px-2 py-1.5">{clip.error}</div>}
-
-                        {/* ── Bottom actions ── */}
-                        <div className="flex items-center gap-2 mt-auto pt-1 border-t border-gray-50">
-                          <span className="text-[9px] text-gray-400 font-mono">{clip.startTime}→{clip.endTime}</span>
-                          <div className="flex-1" />
+                        {/* Download */}
+                        <div className="mt-auto pt-1 border-t border-gray-50">
                           {isDoneClip ? (
                             <a href={`/api/clipper/download/${clip.downloadToken}`} download="clip.mp4"
-                              className="flex items-center gap-1 bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] font-bold px-2.5 py-1.5 rounded-lg transition-colors">
-                              <Download className="w-3 h-3" />
-                              {clip.sizeMb ? `${clip.sizeMb}MB` : "Download"}
+                              className="flex items-center justify-center gap-1 w-full bg-emerald-500 hover:bg-emerald-600 text-white text-[9px] font-bold py-1.5 rounded-lg transition-colors">
+                              <Download className="w-2.5 h-2.5" />
+                              {clip.sizeMb ? `${clip.sizeMb} MB` : "Download"}
                             </a>
                           ) : (
-                            <span className={cn("text-[10px] px-2 py-1 rounded-lg font-medium border",
+                            <div className={cn("text-center text-[9px] py-1.5 rounded-lg font-medium border",
                               clip.status === "processing" ? "bg-amber-50 text-amber-700 border-amber-200" :
-                              clip.status === "error" ? "bg-red-50 text-red-600 border-red-100" :
-                              "bg-gray-50 text-gray-400 border-gray-100"
-                            )}>{clip.status === "processing" ? "Processing…" : clip.status === "error" ? "Failed" : "Queued"}</span>
+                              clip.status === "error"      ? "bg-red-50 text-red-600 border-red-100" :
+                                                             "bg-gray-50 text-gray-400 border-gray-100"
+                            )}>
+                              {clip.status === "processing" ? "Processing…" : clip.status === "error" ? "Failed" : "Queued"}
+                            </div>
                           )}
                         </div>
                       </div>

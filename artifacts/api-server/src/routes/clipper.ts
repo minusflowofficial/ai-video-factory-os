@@ -253,19 +253,21 @@ ${hookConstraint}
 TRANSCRIPT (timestamps in MM:SS or HH:MM:SS):
 ${transcriptText || "No transcript — choose timestamps spread evenly across the video."}
 
+LANGUAGE RULE: Detect the primary language of the transcript. Write EVERY text field (topic, hook, suggestedTitle, hashtags, description) in that SAME detected language. If the transcript is Urdu → write in Urdu. If Hindi → Hindi. If English → English. Never translate.
+
 Return ONLY a JSON array (no other text):
 [{
   "id":1,
   "startTime":"00:01:23",
   "endTime":"00:01:53",
   "duration":"30s",
-  "topic":"one sentence description",
+  "topic":"one sentence description (in detected language)",
   "hookType":"Curiosity",
   "viralScore":9,
-  "hook":"opening hook under 12 words",
-  "suggestedTitle":"Catchy YouTube/TikTok title for this clip",
-  "hashtags":["#viral","#trending","#topic","#niche","#shorts"],
-  "description":"2-3 sentence caption/description for this clip that can be copy-pasted to YouTube Shorts or TikTok. Include the hook, what viewers will learn, and end with a soft CTA."
+  "hook":"opening hook under 10 words (in detected language)",
+  "suggestedTitle":"Catchy YouTube/TikTok title (in detected language)",
+  "hashtags":["#tag1","#tag2","#tag3","#tag4","#tag5"],
+  "description":"2-3 sentence caption for YouTube Shorts/TikTok (in detected language). Include what viewers will learn and end with a soft CTA."
 }]` },
       ],
     }),
